@@ -9,3 +9,5 @@ dist
 
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+.vercel
+.env*

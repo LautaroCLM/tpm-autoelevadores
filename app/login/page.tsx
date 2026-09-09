@@ -1,17 +1,27 @@
 'use client';
 
-import React, { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { signInSupervisor } from '../../lib/api/auth';
-import { Truck, ShieldCheck, Lock, Mail, ArrowRight, ArrowLeft } from 'lucide-react';
+import { signInSupervisor, getCurrentSessionAndProfile } from '../../lib/api/auth';
+import { ShieldCheck, Lock, Mail, ArrowRight, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
-export default function SupervisorLoginPage() {
-  const router = useRouter();
+function LoginForm() {
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    // Si el usuario ya tiene sesión activa, redirigir automáticamente
+    getCurrentSessionAndProfile().then(({ user, perfil }) => {
+      if (user && (perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento')) {
+        const redirectTo = searchParams?.get('redirectTo') || '/dashboard';
+        window.location.href = redirectTo;
+      }
+    });
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -25,13 +35,19 @@ export default function SupervisorLoginPage() {
       const res = await signInSupervisor(email, password);
       if (res.success) {
         toast.success(`Bienvenido, ${res.perfil?.nombre || 'Supervisor'}`);
-        router.push('/dashboard');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+        }
+        const redirectTo = searchParams?.get('redirectTo') || '/dashboard';
+        // Usar window.location.href para forzar navegación completa,
+        // invalidar el client router cache de Next.js y enviar cookies frescas
+        window.location.href = redirectTo;
       } else {
         toast.error(res.error || 'Credenciales incorrectas');
+        setLoading(false);
       }
     } catch (err: any) {
       toast.error(err?.message || 'Error al iniciar sesión');
-    } finally {
       setLoading(false);
     }
   };
@@ -128,5 +144,13 @@ export default function SupervisorLoginPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SupervisorLoginPage() {
+  return (
+    <Suspense fallback={<div className="max-w-md mx-auto px-4 py-16 text-center text-slate-400 text-sm">Cargando...</div>}>
+      <LoginForm />
+    </Suspense>
   );
 }

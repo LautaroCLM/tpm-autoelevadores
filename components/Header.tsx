@@ -31,8 +31,8 @@ export const Header: React.FC = () => {
     toast.info('Sesión cerrada');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+      window.location.href = '/';
     }
-    router.push('/');
   };
 
   return (
@@ -69,6 +69,7 @@ export const Header: React.FC = () => {
 
           <Link
             href="/dashboard"
+            prefetch={false}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
               pathname.startsWith('/dashboard')
                 ? 'bg-amber-500 text-slate-950 shadow-sm'
