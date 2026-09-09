@@ -2,7 +2,8 @@
 
 import React, { useState, useRef } from 'react';
 import { GravedadFalla } from '../lib/types/tpm';
-import { X, Camera, AlertTriangle, AlertOctagon, Info, Trash2, Image as ImageIcon } from 'lucide-react';
+import { X, Camera, AlertTriangle, AlertOctagon, Info, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { compressImage } from '../lib/utils/imageCompression';
 
 interface FallaModalProps {
   isOpen: boolean;
@@ -26,13 +27,26 @@ export const FallaModal: React.FC<FallaModalProps> = ({
   const [gravedad, setGravedad] = useState<GravedadFalla>(initialGravedad);
   const [descripcion, setDescripcion] = useState<string>(initialDescripcion);
   const [fotoBase64, setFotoBase64] = useState<string>(initialFoto);
+  const [isCompressing, setIsCompressing] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    setIsCompressing(true);
+    try {
+      const compressedDataUrl = await compressImage(file, {
+        maxWidth: 1280,
+        maxHeight: 720,
+        quality: 0.75,
+      });
+      setFotoBase64(compressedDataUrl);
+    } catch (err) {
+      console.error('Error al procesar/comprimir imagen:', err);
+      // Fallback a lectura estándar en caso de fallo inesperado del canvas
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
@@ -40,6 +54,8 @@ export const FallaModal: React.FC<FallaModalProps> = ({
         }
       };
       reader.readAsDataURL(file);
+    } finally {
+      setIsCompressing(false);
     }
   };
 
@@ -187,7 +203,15 @@ export const FallaModal: React.FC<FallaModalProps> = ({
               className="hidden"
             />
 
-            {!fotoBase64 ? (
+            {isCompressing ? (
+              <div className="border-2 border-slate-700 bg-slate-950/60 rounded-xl p-5 text-center flex flex-col items-center justify-center gap-2 h-44">
+                <Loader2 size={24} className="animate-spin text-amber-400" />
+                <div>
+                  <p className="text-xs font-semibold text-slate-200">Optimizando fotografía...</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Comprimiendo imagen a 720p</p>
+                </div>
+              </div>
+            ) : !fotoBase64 ? (
               <div
                 onClick={() => fileInputRef.current?.click()}
                 className="border-2 border-dashed border-slate-700 hover:border-amber-500/60 bg-slate-950/60 rounded-xl p-5 text-center cursor-pointer transition flex flex-col items-center justify-center gap-2 group"
@@ -240,9 +264,12 @@ export const FallaModal: React.FC<FallaModalProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm shadow-lg shadow-rose-900/30 transition cursor-pointer"
+            disabled={isCompressing}
+            className={`flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-sm shadow-lg shadow-rose-900/30 transition cursor-pointer ${
+              isCompressing ? 'opacity-50 cursor-not-allowed' : ''
+            }`}
           >
-            Confirmar Falla
+            {isCompressing ? 'Procesando...' : 'Confirmar Falla'}
           </button>
         </div>
       </div>
