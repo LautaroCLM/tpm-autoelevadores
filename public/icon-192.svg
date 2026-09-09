@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="36" fill="#0f172a"/>
+  <!-- Forklift icon in industrial amber -->
+  <path d="M40 136h20a16 16 0 0 0 32 0h24a16 16 0 0 0 32 0h12v-12h-8v-36h-28l-16-24H60v60H40v12zm108 0a8 8 0 1 1-16 0 8 8 0 0 1 16 0zm-56 0a8 8 0 1 1-16 0 8 8 0 0 1 16 0zm-20-60h36l10 16h-46V76z" fill="#f59e0b"/>
+  <!-- Mast & forks -->
+  <path d="M148 48h8v76h-8V48zm12 64h16v12h-16v-12z" fill="#f59e0b"/>
+  <!-- Status badge dot -->
+  <circle cx="152" cy="40" r="10" fill="#10b981"/>
+</svg>
