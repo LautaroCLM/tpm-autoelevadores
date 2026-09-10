@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { Wifi, WifiOff, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { getQueuedInspecciones, processOfflineQueue } from '../lib/offline/queue';
-import { submitInspeccion } from '../lib/api/tpm';
+import { submitInspeccion, isNetworkError } from '../lib/api/tpm';
 import { toast } from 'sonner';
 
 export const OfflineIndicator: React.FC = () => {
@@ -12,12 +12,28 @@ export const OfflineIndicator: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   useEffect(() => {
-    // 1. Service worker registration
+    // 1. Service worker registration (solo en producción para no interferir con Webpack HMR)
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('/sw.js')
-        .then(() => console.log('PWA Service Worker registered'))
-        .catch((err) => console.warn('Service Worker registration failed:', err));
+      if (process.env.NODE_ENV === 'production') {
+        navigator.serviceWorker
+          .register('/sw.js')
+          .then(() => console.log('PWA Service Worker registered'))
+          .catch((err) => console.warn('Service Worker registration failed:', err));
+      } else {
+        // En entorno de desarrollo, desregistrar para evitar cache corrupto de Webpack
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister();
+          }
+        });
+        if ('caches' in window) {
+          caches.keys().then((names) => {
+            for (const name of names) {
+              caches.delete(name);
+            }
+          });
+        }
+      }
     }
 
     // 2. Initial state
@@ -69,11 +85,18 @@ export const OfflineIndicator: React.FC = () => {
     try {
       const result = await processOfflineQueue(async (payload) => {
         const res = await submitInspeccion(payload);
-        return res.success;
+        return {
+          success: res.success,
+          error: res.error,
+          isFatal: !res.success && !res.queuedOffline && !isNetworkError(res.error),
+        };
       });
 
       if (result.synced > 0) {
         toast.success(`Se sincronizaron ${result.synced} inspección(es) pendiente(s)`);
+      }
+      if (result.fatal > 0) {
+        toast.error(`Hubo ${result.fatal} inspección(es) con errores de validación que se removieron de la cola local.`);
       }
       const items = await getQueuedInspecciones();
       setQueueCount(items.length);
@@ -89,23 +112,23 @@ export const OfflineIndicator: React.FC = () => {
   }
 
   return (
-    <div className="w-full bg-slate-900 border-b border-slate-800 px-4 py-2 sticky top-0 z-50 transition-all">
-      <div className="max-w-5xl mx-auto flex items-center justify-between text-xs sm:text-sm">
+    <div className="w-full bg-[#0b0f17] border-b border-slate-800/80 px-3 sm:px-4 py-2 sticky top-0 z-50 transition-all">
+      <div className="max-w-6xl mx-auto flex items-center justify-between text-xs">
         <div className="flex items-center gap-2">
           {!isOnline ? (
-            <span className="flex items-center gap-1.5 font-semibold text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
-              <WifiOff size={14} className="animate-pulse text-amber-400" />
-              Sin conexión (Modo Planta)
+            <span className="flex items-center gap-1.5 font-bold text-amber-300 bg-amber-500/15 px-2.5 py-1 rounded-lg border border-amber-500/30">
+              <WifiOff size={13} className="animate-pulse text-amber-400" />
+              <span>Modo Planta (Sin Conexión)</span>
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 font-medium text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full">
-              <Wifi size={14} /> En línea
+            <span className="flex items-center gap-1.5 font-bold text-emerald-400 bg-emerald-500/15 px-2.5 py-0.5 rounded-lg border border-emerald-500/30">
+              <Wifi size={13} /> En Línea
             </span>
           )}
 
           {queueCount > 0 && (
-            <span className="text-slate-300">
-              <strong className="text-amber-300 font-bold">{queueCount}</strong> inspección(es) pendiente(s) de sincronizar
+            <span className="text-slate-300 text-xs">
+              <strong className="text-amber-300 font-mono font-tabular font-bold">{queueCount}</strong> checklist(s) en cola local
             </span>
           )}
         </div>
@@ -114,13 +137,14 @@ export const OfflineIndicator: React.FC = () => {
           <button
             onClick={handleSync}
             disabled={isSyncing}
-            className="flex items-center gap-1.5 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-lg text-xs transition active:scale-95 disabled:opacity-50 cursor-pointer btn-tactile shadow-xs"
           >
             <RefreshCw size={12} className={isSyncing ? 'animate-spin' : ''} />
-            {isSyncing ? 'Sincronizando...' : 'Sincronizar ahora'}
+            <span>{isSyncing ? 'Sincronizando...' : 'Sincronizar ahora'}</span>
           </button>
         )}
       </div>
     </div>
   );
 };
+

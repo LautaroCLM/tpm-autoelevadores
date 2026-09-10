@@ -53,7 +53,7 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
   },
 });
 
-// 3. Lista de usuarios de prueba a crear / sincronizar
+// 3. Lista de usuarios de planta a crear / sincronizar
 const USERS_TO_SEED = [
   {
     email: 'op_4029@tpmplanta.com',
@@ -70,6 +70,22 @@ const USERS_TO_SEED = [
     legajo: '5118',
     rol: 'operador',
     qrPayload: 'TPM:OP:5118:[REDACTADO_TOKEN_OP_5118]',
+  },
+  {
+    email: 'op_2045@tpmplanta.com',
+    password: '[REDACTADO_TOKEN_OP_2045]',
+    nombre: 'Lucas Martínez',
+    legajo: '2045',
+    rol: 'operador',
+    qrPayload: 'TPM:OP:2045:[REDACTADO_TOKEN_OP_2045]',
+  },
+  {
+    email: 'op_3082@tpmplanta.com',
+    password: '[REDACTADO_TOKEN_OP_3082]',
+    nombre: 'Martín Rodríguez',
+    legajo: '3082',
+    rol: 'operador',
+    qrPayload: 'TPM:OP:3082:[REDACTADO_TOKEN_OP_3082]',
   },
   {
     email: 'supervisor@tpm.com',

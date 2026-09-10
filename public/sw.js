@@ -31,6 +31,13 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+
+  // Nunca interceptar ni cachear chunks dinámicos de Next.js ni Webpack HMR
+  if (url.pathname.startsWith('/_next/') || url.pathname.includes('webpack') || url.pathname.includes('hot-update')) {
+    return;
+  }
+
   // Navigation or static asset fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(

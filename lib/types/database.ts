@@ -122,6 +122,7 @@ export type Database = {
       inspecciones: {
         Row: {
           id: string;
+          client_generated_id: string | null;
           equipo_id: string;
           operador_id: string;
           template_id: string;
@@ -132,6 +133,7 @@ export type Database = {
         };
         Insert: {
           id?: string;
+          client_generated_id?: string | null;
           equipo_id: string;
           operador_id: string;
           template_id: string;
@@ -142,6 +144,7 @@ export type Database = {
         };
         Update: {
           id?: string;
+          client_generated_id?: string | null;
           equipo_id?: string;
           operador_id?: string;
           template_id?: string;
@@ -218,6 +221,24 @@ export type Database = {
           resuelto_en?: string | null;
         };
       };
+    };
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      registrar_inspeccion_completa: {
+        Args: {
+          p_payload: Json;
+        };
+        Returns: Json;
+      };
+      is_supervisor_or_maint: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+    };
+    Enums: {
+      [_ in never]: never;
     };
   };
 };

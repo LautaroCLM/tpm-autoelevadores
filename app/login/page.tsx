@@ -88,35 +88,37 @@ function LoginForm() {
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8 sm:py-14 w-full space-y-6">
+    <div className="max-w-md mx-auto px-4 py-8 sm:py-16 w-full space-y-6">
       <Link
         href="/"
-        className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition"
+        className="inline-flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-slate-400 hover:text-white transition"
       >
-        <ArrowLeft size={14} />
-        <span>Volver a la página principal</span>
+        <ArrowLeft size={14} className="text-amber-500" />
+        <span>Volver a la consola principal</span>
       </Link>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
-        <div className="absolute -right-8 -top-8 w-40 h-40 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
-
-        {/* Logo / Header */}
-        <div className="space-y-2 text-center">
-          <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mx-auto shadow-inner">
-            <ShieldCheck size={28} />
+      <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-black/60 space-y-6 relative overflow-hidden">
+        {/* Plant Header Badge */}
+        <div className="space-y-3 text-center">
+          <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-inner">
+            <ShieldCheck size={26} />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-tight">
-            Acceso TPM Autoelevadores
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono uppercase tracking-wider text-slate-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+            Terminal de Acceso Seguro
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+            TPM Autoelevadores
           </h1>
-          <p className="text-xs text-slate-400">
-            Identificación de Operadores y Supervisores para mantenimiento preventivo
+          <p className="text-xs text-slate-400 max-w-xs mx-auto">
+            Identificación de Operadores y Supervisores para mantenimiento y checklist diario
           </p>
         </div>
 
         {/* Formulario */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+            <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Usuario, Legajo o Correo
             </label>
             <div className="relative">
@@ -127,13 +129,13 @@ function LoginForm() {
                 onChange={(e) => setIdentifier(e.target.value)}
                 required
                 placeholder="Ej: 4029 o supervisor@tpm.com"
-                className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+            <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
               Contraseña
             </label>
             <div className="relative">
@@ -144,7 +146,7 @@ function LoginForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
               />
             </div>
           </div>
@@ -156,7 +158,7 @@ function LoginForm() {
                 type="checkbox"
                 checked={rememberUser}
                 onChange={(e) => setRememberUser(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
+                className="w-4 h-4 rounded border-slate-700 bg-[#0B0F17] text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
               />
               <span className="text-xs text-slate-300 font-medium">Recordar usuario</span>
             </label>
@@ -165,16 +167,16 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 disabled:opacity-50 cursor-pointer mt-2"
+            className="btn-tactile w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
           >
-            <span>{loading ? 'Verificando...' : 'Iniciar Sesión'}</span>
+            <span>{loading ? 'Verificando credenciales...' : 'Iniciar Sesión'}</span>
             <ArrowRight size={16} />
           </button>
         </form>
 
-        <div className="pt-3 border-t border-slate-800 text-center">
-          <p className="text-[11px] text-slate-500">
-            La sesión permanecerá activa durante el día de trabajo.
+        <div className="pt-4 border-t border-slate-800/80 text-center">
+          <p className="text-[11px] font-mono text-slate-500">
+            La sesión permanecerá activa durante la jornada de trabajo.
           </p>
         </div>
       </div>

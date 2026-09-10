@@ -54,9 +54,11 @@ export async function updateSession(request: NextRequest) {
 
     const currentPath = request.nextUrl.pathname;
 
-    // 2. Protección de rutas operativas: /equipo y /inspeccion
+    // 2. Protección de rutas operativas: /equipo, /inspeccion y /perfil
     const isProtectedOperationalRoute =
-      currentPath.startsWith('/equipo') || currentPath.startsWith('/inspeccion');
+      currentPath.startsWith('/equipo') || 
+      currentPath.startsWith('/inspeccion') || 
+      currentPath.startsWith('/perfil');
 
     if (isProtectedOperationalRoute && !isSessionValidToday) {
       const targetPath = currentPath + request.nextUrl.search;

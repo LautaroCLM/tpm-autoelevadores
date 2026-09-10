@@ -264,3 +264,105 @@ export async function signOutUser(): Promise<void> {
   clearLoginSessionDay();
   await supabase.auth.signOut();
 }
+
+/**
+ * Actualiza de forma segura el nombre y legajo del perfil del usuario autenticado.
+ * Invoca el RPC 'actualizar_mi_perfil' con fallback protegido por RLS.
+ * Garantiza que jamás se puedan modificar rol, email, contraseña ni permisos.
+ */
+export async function updateUserProfile({
+  nombre,
+  legajo,
+}: {
+  nombre: string;
+  legajo: string;
+}): Promise<{
+  success: boolean;
+  perfil?: Perfil;
+  error?: string;
+}> {
+  const cleanNombre = nombre.trim();
+  const cleanLegajo = legajo.trim();
+
+  if (!cleanNombre) {
+    return { success: false, error: 'El nombre y apellido son obligatorios' };
+  }
+  if (!cleanLegajo) {
+    return { success: false, error: 'El número de legajo es obligatorio' };
+  }
+
+  const supabase = createClient();
+
+  try {
+    // 1. Intentar actualizar vía RPC seguro
+    const { data: rpcData, error: rpcErr } = await (supabase.rpc as any)(
+      'actualizar_mi_perfil',
+      {
+        p_nombre: cleanNombre,
+        p_legajo: cleanLegajo,
+      }
+    );
+
+    if (!rpcErr && rpcData) {
+      if (!rpcData.success) {
+        return { success: false, error: rpcData.error || 'No se pudo actualizar el perfil' };
+      }
+
+      // Notificar a componentes en pantalla que el perfil cambió
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+      }
+
+      return {
+        success: true,
+        perfil: rpcData.perfil,
+      };
+    }
+
+    // 2. Fallback de compatibilidad mediante RLS directo
+    const { data: authUser } = await supabase.auth.getUser();
+    if (!authUser?.user) {
+      return { success: false, error: 'Sesión no válida o expirada' };
+    }
+
+    const { data: updatedProfile, error: updateErr } = await (supabase
+      .from('perfiles') as any)
+      .update({
+        nombre: cleanNombre,
+        legajo: cleanLegajo,
+      })
+      .eq('id', authUser.user.id)
+      .select('*')
+      .single();
+
+    if (updateErr) {
+      if (updateErr.code === '23505' || updateErr.message?.includes('unique') || updateErr.message?.includes('legajo')) {
+        return { success: false, error: 'El número de legajo ya se encuentra asignado a otro empleado' };
+      }
+      return { success: false, error: updateErr.message || 'Error al guardar los cambios' };
+    }
+
+    // Actualizar metadata de auth para consistencia
+    await supabase.auth.updateUser({
+      data: {
+        nombre: cleanNombre,
+        legajo: cleanLegajo,
+      },
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+    }
+
+    return {
+      success: true,
+      perfil: updatedProfile as Perfil,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Error de conexión al actualizar el perfil',
+    };
+  }
+}
+

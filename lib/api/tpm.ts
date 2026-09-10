@@ -127,13 +127,52 @@ export async function fetchActiveChecklistTemplate(): Promise<{
     items: items as ChecklistItem[],
   };
 }
+/**
+ * Determina de forma precisa si un error se debe a falta de conectividad/red
+ * o si es un error de negocio/validación retornado por PostgreSQL / Supabase.
+ */
+export function isNetworkError(err: any): boolean {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return true;
+  }
+  if (!err) return false;
+
+  // Si tiene código de error de Postgres / PostgREST (como P0001, 23505, 42501) o status HTTP 4xx, NO es de red
+  if (err.code && typeof err.code === 'string' && (err.code.startsWith('P') || err.code.length === 5)) {
+    return false;
+  }
+  if (err.status && typeof err.status === 'number' && err.status >= 400 && err.status < 500) {
+    return false;
+  }
+
+  const msg = (err.message || (typeof err === 'string' ? err : '')).toLowerCase();
+  const networkKeywords = [
+    'failed to fetch',
+    'networkerror',
+    'network error',
+    'fetch error',
+    'load failed',
+    'timeout',
+    'connection refused',
+    'err_name_not_resolved',
+    'err_internet_disconnected',
+    'err_connection_refused',
+    'the operation was aborted',
+  ];
+
+  return networkKeywords.some((keyword) => msg.includes(keyword));
+}
 
 export async function submitInspeccion(payload: InspeccionPayload): Promise<{
   success: boolean;
   inspeccionId?: string;
   queuedOffline?: boolean;
   error?: string;
+  idempotent?: boolean;
 }> {
+  // Asegurar clave de idempotencia única generada por el cliente
+  payload.client_generated_id = payload.client_generated_id || crypto.randomUUID();
+
   // Modo desarrollo sin configuración de Supabase
   if (!isSupabaseConfigured()) {
     const res = await saveMockInspeccion(payload);
@@ -144,8 +183,8 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
     const supabase = createClient();
 
     // Validar usuario autenticado y asegurar operador_id real
-    const { data: authData } = await supabase.auth.getUser();
-    if (!authData?.user) {
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    if (authError || !authData?.user) {
       return {
         success: false,
         queuedOffline: false,
@@ -154,124 +193,124 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
     }
     payload.operador_id = authData.user.id;
 
-    // 1. Cabecera de inspección
-    const { data: inspData, error: inspError } = await (supabase.from('inspecciones') as any)
-      .insert({
-        equipo_id: payload.equipo_id,
-        operador_id: payload.operador_id,
-        template_id: payload.template_id,
-        horometro: payload.horometro,
-        iniciado_en: payload.iniciado_en,
-        finalizado_en: payload.finalizado_en,
-        estado_resultante: payload.estado_resultante,
-      })
-      .select('id')
-      .single();
+    // 1. Subir fotos de fallas a Supabase Storage con paths deterministas antes del RPC
+    const rpcRespuestas = [];
 
-    if (inspError || !inspData) {
-      throw new Error(inspError?.message || 'Error al guardar inspección en Supabase');
-    }
-
-    const inspeccionId = inspData.id as string;
-
-    // 2. Guardar respuestas de cada ítem
     for (const resp of payload.respuestas) {
-      const { data: respData, error: respError } = await (supabase.from('respuestas_item') as any)
-        .insert({
-          inspeccion_id: inspeccionId,
-          item_id: resp.item_id,
-          valor_bool: resp.valor_bool,
-          valor_numero: resp.valor_numero,
-          valor_texto: resp.valor_texto,
-          es_falla: resp.es_falla,
-        })
-        .select('id')
-        .single();
+      let uploadedPhotoUrl = resp.falla?.foto_url || null;
 
-      if (respError) {
-        console.error('Error al guardar respuesta de ítem:', respError);
-        continue;
-      }
+      if (resp.es_falla && resp.falla?.foto_base64 && resp.falla.foto_base64.startsWith('data:image')) {
+        try {
+          const base64Data = resp.falla.foto_base64.split(',')[1];
+          const mimeMatch = resp.falla.foto_base64.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
+          const contentType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+          const ext = contentType.split('/')[1] || 'jpg';
+          // Nombre determinista por equipo, UUID de cliente e ítem
+          const fileName = `${payload.equipo_id}/${payload.client_generated_id}_${resp.item_id}.${ext}`;
 
-      // 3. Si es falla, registrar en tabla fallas
-      if (resp.es_falla && resp.falla && respData) {
-        let uploadedPhotoUrl = resp.falla.foto_url || null;
-
-        if (resp.falla.foto_base64 && resp.falla.foto_base64.startsWith('data:image')) {
-          try {
-            const base64Data = resp.falla.foto_base64.split(',')[1];
-            const mimeMatch = resp.falla.foto_base64.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
-            const contentType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-            const ext = contentType.split('/')[1] || 'jpg';
-            const fileName = `${payload.equipo_id}/${inspeccionId}_${resp.item_id}.${ext}`;
-
-            const byteCharacters = atob(base64Data);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-              byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: contentType });
-
-            const { error: uploadErr } = await supabase.storage
-              .from('fallas-fotos')
-              .upload(fileName, blob, { contentType, upsert: true });
-
-            if (!uploadErr) {
-              const { data: publicUrlData } = supabase.storage
-                .from('fallas-fotos')
-                .getPublicUrl(fileName);
-              uploadedPhotoUrl = publicUrlData.publicUrl;
-            } else {
-              console.warn('Error subiendo foto al bucket de Supabase:', uploadErr);
-            }
-          } catch (uploadException) {
-            console.warn('Excepción al procesar imagen para storage:', uploadException);
+          const byteCharacters = atob(base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
           }
-        }
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], { type: contentType });
 
-        await (supabase.from('fallas') as any).insert({
-          respuesta_id: respData.id,
-          equipo_id: payload.equipo_id,
-          gravedad: resp.falla.gravedad,
-          descripcion: resp.falla.descripcion,
-          foto_url: uploadedPhotoUrl,
-          detectado_por: payload.operador_id,
-          estado_reparacion: 'pendiente',
-        });
+          const { error: uploadErr } = await supabase.storage
+            .from('fallas-fotos')
+            .upload(fileName, blob, { contentType, upsert: true });
+
+          if (!uploadErr) {
+            const { data: publicUrlData } = supabase.storage
+              .from('fallas-fotos')
+              .getPublicUrl(fileName);
+            uploadedPhotoUrl = publicUrlData.publicUrl;
+            resp.falla.foto_url = uploadedPhotoUrl;
+          } else {
+            console.warn('Error subiendo foto al bucket de Supabase:', uploadErr);
+            if (isNetworkError(uploadErr)) {
+              throw uploadErr;
+            }
+          }
+        } catch (uploadException: any) {
+          if (isNetworkError(uploadException)) {
+            throw uploadException;
+          }
+          console.warn('Excepción al procesar imagen para storage:', uploadException);
+        }
       }
+
+      rpcRespuestas.push({
+        item_id: resp.item_id,
+        valor_bool: resp.valor_bool,
+        valor_numero: resp.valor_numero,
+        valor_texto: resp.valor_texto,
+        es_falla: resp.es_falla,
+        falla: resp.es_falla && resp.falla ? {
+          gravedad: resp.falla.gravedad,
+          descripcion: resp.falla.descripcion || null,
+          foto_url: uploadedPhotoUrl,
+        } : undefined,
+      });
     }
 
-    return { success: true, inspeccionId };
+    // 2. Ejecutar la función RPC atómica en PostgreSQL
+    const rpcPayload = {
+      client_generated_id: payload.client_generated_id,
+      equipo_id: payload.equipo_id,
+      operador_id: payload.operador_id,
+      template_id: payload.template_id,
+      horometro: payload.horometro,
+      iniciado_en: payload.iniciado_en,
+      finalizado_en: payload.finalizado_en,
+      estado_resultante: payload.estado_resultante,
+      respuestas: rpcRespuestas,
+    };
+
+    const { data, error: rpcError } = await (supabase as any).rpc('registrar_inspeccion_completa', {
+      p_payload: rpcPayload as any,
+    });
+
+    if (rpcError) {
+      if (isNetworkError(rpcError)) {
+        throw rpcError;
+      }
+      return {
+        success: false,
+        queuedOffline: false,
+        error: rpcError.message || 'Error al validar o registrar la inspección en la base de datos',
+      };
+    }
+
+    const rpcResult = data as { success: boolean; inspeccion_id: string; idempotent?: boolean } | null;
+    return {
+      success: true,
+      inspeccionId: rpcResult?.inspeccion_id,
+      idempotent: rpcResult?.idempotent,
+    };
   } catch (err: any) {
     console.error('Error procesando inspección:', err);
 
     // Solo encolar offline si efectivamente hay un problema de red
-    const isOffline =
-      (typeof navigator !== 'undefined' && !navigator.onLine) ||
-      err?.message?.includes('Failed to fetch') ||
-      err?.message?.includes('NetworkError') ||
-      err?.message?.includes('network');
-
-    if (isOffline) {
+    if (isNetworkError(err)) {
       try {
         await enqueueInspeccion(payload);
         return {
           success: false,
           queuedOffline: true,
           inspeccionId: 'offline-queued',
-          error: 'Sin conexión: la inspección se guardó en este dispositivo',
+          error: 'Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente',
         };
       } catch (queueErr) {
         return {
           success: false,
           queuedOffline: false,
-          error: `Error al guardar localmente: ${err?.message}`,
+          error: `Error al guardar localmente en el dispositivo: ${err?.message}`,
         };
       }
     }
 
-    // Error lógico o de base de datos: reportar el error real
+    // Error lógico o de base de datos: reportar el error real sin encolar
     return {
       success: false,
       queuedOffline: false,

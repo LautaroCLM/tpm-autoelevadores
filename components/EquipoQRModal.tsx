@@ -180,18 +180,27 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
           </button>
         </div>
 
-        {/* Contenedor del QR en grande, nítido y con zona de seguridad */}
+        {/* Contenedor del QR: Placa Técnica de Fábrica */}
         <div className="flex flex-col items-center">
-          <div className="bg-white p-4 sm:p-5 rounded-3xl border-4 border-amber-500 shadow-xl inline-block max-w-[280px] sm:max-w-[320px] w-full">
-            <div className="text-[11px] font-black tracking-wider uppercase text-slate-500 mb-1">
-              TPM AUTOELEVADORES
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-slate-300 shadow-2xl inline-block max-w-[290px] sm:max-w-[320px] w-full text-slate-950">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 mb-2">
+              <span className="text-[10px] font-black tracking-widest uppercase text-slate-500 font-mono">
+                TPM • PLANTA INDUSTRIAL
+              </span>
+              <span className="text-[10px] font-mono font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
+                {equipo.marca}
+              </span>
             </div>
-            <div className="text-xl sm:text-2xl font-black text-slate-950 tracking-tight">
+
+            <div className="text-2xl sm:text-3xl font-black tracking-tight text-slate-950">
               INTERNO #{equipo.interno}
+            </div>
+            <div className="text-xs text-slate-600 font-medium">
+              {equipo.modelo} • Combustible: {equipo.combustible || 'GLP'}
             </div>
 
             {/* Código QR */}
-            <div className="w-56 h-56 sm:w-64 sm:h-64 mx-auto my-2.5 flex items-center justify-center bg-white">
+            <div className="w-52 h-52 sm:w-60 sm:h-60 mx-auto my-3 p-2 bg-white border border-slate-200 rounded-xl flex items-center justify-center">
               {generating ? (
                 <div className="flex flex-col items-center gap-2 text-slate-400">
                   <div className="w-8 h-8 border-3 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -209,28 +218,28 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
               )}
             </div>
 
-            <div className="font-mono text-xs font-bold tracking-widest text-slate-700 bg-slate-100 py-1 px-3 rounded-lg inline-block">
+            <div className="font-mono text-xs font-bold tracking-widest text-slate-800 bg-slate-100 py-1.5 px-3 rounded-lg border border-slate-300 inline-block">
               {equipo.qr_codigo}
             </div>
           </div>
         </div>
 
         {/* Indicación de escaneo */}
-        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 flex items-center gap-2.5 text-left text-xs text-amber-300">
+        <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 flex items-center gap-2.5 text-left text-xs text-amber-300">
           <Camera size={18} className="shrink-0 text-amber-400" />
           <span className="leading-snug">
-            Escaneá este código con la cámara del celular para acceder a la inspección.
+            Escaneá este código con la cámara del celular para acceder a la ficha e iniciar el checklist.
           </span>
         </div>
 
         {/* URL secundaria asociada al QR */}
         <div className="space-y-1.5 text-left">
           <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-1">
-            <span>URL de destino asociada:</span>
+            <span>URL de destino:</span>
             <button
               type="button"
               onClick={handleCopyUrl}
-              className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold cursor-pointer"
+              className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-bold cursor-pointer transition"
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
               <span>{copied ? 'Copiada' : 'Copiar URL'}</span>
@@ -251,31 +260,31 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
         </div>
 
         {/* Botones de acción */}
-        <div className="space-y-2 pt-2">
+        <div className="space-y-2 pt-1">
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
               onClick={handleDownload}
-              className="py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 cursor-pointer"
+              className="py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-98 cursor-pointer btn-tactile"
             >
               <Download size={16} />
-              <span>Descargar QR</span>
+              <span>Descargar PNG</span>
             </button>
 
             <button
               type="button"
               onClick={handlePrint}
-              className="py-3 px-4 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-700 active:scale-98 cursor-pointer"
+              className="py-3 px-4 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-700 active:scale-98 cursor-pointer btn-tactile"
             >
               <Printer size={15} />
-              <span>Imprimir</span>
+              <span>Imprimir Sticker</span>
             </button>
           </div>
 
           <button
             type="button"
             onClick={onClose}
-            className="w-full py-2.5 bg-slate-800/60 hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-xs rounded-xl transition cursor-pointer"
+            className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white font-bold text-xs rounded-xl transition cursor-pointer border border-slate-800"
           >
             Cerrar
           </button>
@@ -284,3 +293,4 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
     </div>
   );
 }
+

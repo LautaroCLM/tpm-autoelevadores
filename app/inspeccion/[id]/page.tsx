@@ -7,6 +7,7 @@ import {
   fetchEquipoById,
   fetchActiveChecklistTemplate,
   submitInspeccion,
+  isNetworkError,
 } from '../../../lib/api/tpm';
 import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
 import {
@@ -71,6 +72,7 @@ export default function InspeccionChecklistPage() {
   } | null>(null);
 
   const startTime = useMemo(() => new Date().toISOString(), []);
+  const [clientGeneratedId] = useState<string>(() => crypto.randomUUID());
 
   useEffect(() => {
     async function initData() {
@@ -252,11 +254,12 @@ export default function InspeccionChecklistPage() {
 
   // Finalizar inspección
   const handleSubmitInspection = async () => {
+    if (isSubmitting) return;
     if (!equipo || !template) return;
 
     // Verificar si faltan ítems por responder
     const pendingBooleanItems = items.filter(
-      (item) => item.tipo_dato === 'booleano' && responses[item.id]?.valor_bool === null
+      (item) => item.tipo_dato === 'booleano' && (!responses[item.id] || responses[item.id]?.valor_bool === null)
     );
 
     if (pendingBooleanItems.length > 0) {
@@ -283,7 +286,24 @@ export default function InspeccionChecklistPage() {
 
     const finalOperadorId = authInfo.user.id;
 
+    // Construir respuestas completas para TODOS los ítems de la plantilla activa
+    const respuestasCompletas: ChecklistItemResponse[] = items.map((it) => {
+      const resp = responses[it.id];
+      if (resp) {
+        return resp;
+      }
+      // Ítems no interactuados explícitamente (ej. campo opcional de texto u observaciones generales)
+      return {
+        item_id: it.id,
+        valor_bool: null,
+        valor_numero: null,
+        valor_texto: null,
+        es_falla: false,
+      };
+    });
+
     const payload = {
+      client_generated_id: clientGeneratedId,
       equipo_id: equipo.id,
       operador_id: finalOperadorId,
       template_id: template.id,
@@ -291,7 +311,7 @@ export default function InspeccionChecklistPage() {
       iniciado_en: startTime,
       finalizado_en: new Date().toISOString(),
       estado_resultante: estadoCalculado,
-      respuestas: Object.values(responses),
+      respuestas: respuestasCompletas,
     };
 
     setIsSubmitting(true);
@@ -309,7 +329,7 @@ export default function InspeccionChecklistPage() {
         return;
       }
 
-      // Enviar a Supabase
+      // Enviar a Supabase (ejecuta RPC atómica con idempotencia y upload determinista de fotos)
       const res = await submitInspeccion(payload);
       if (res.success) {
         toast.success('¡Inspección TPM guardada exitosamente!');
@@ -327,17 +347,13 @@ export default function InspeccionChecklistPage() {
           fallasCount: fallasDetectadas.length,
         });
       } else {
-        // Error de backend / RLS / permisos: mostrar error real y no fingir éxito
+        // Error de negocio / validación / permisos: mostrar error real sin enmascarar
         toast.error(res.error || 'Error al procesar la inspección en el servidor');
       }
     } catch (err: any) {
       console.error('Submit inspection failed:', err);
-      const isOffline =
-        (typeof navigator !== 'undefined' && !navigator.onLine) ||
-        err?.message?.includes('Failed to fetch') ||
-        err?.message?.includes('network');
 
-      if (isOffline) {
+      if (isNetworkError(err)) {
         await enqueueInspeccion(payload);
         toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente al reconectar.');
         setCompletedResult({
@@ -379,77 +395,86 @@ export default function InspeccionChecklistPage() {
   }
 
   // PANTALLA DE ÉXITO AL FINALIZAR
+  // PANTALLA DE ÉXITO AL FINALIZAR
   if (completedResult) {
     return (
       <div className="max-w-xl mx-auto px-4 py-8 sm:py-12 w-full text-center space-y-6">
         <div
-          className={`w-20 h-20 rounded-full mx-auto flex items-center justify-center shadow-2xl ${
+          className={`w-20 h-20 rounded-2xl mx-auto flex items-center justify-center shadow-2xl border-2 ${
             completedResult.estadoResultante === 'operativo'
-              ? 'bg-emerald-500/20 text-emerald-400 border-2 border-emerald-500/40'
+              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/50 shadow-emerald-950/40'
               : completedResult.estadoResultante === 'observado'
-              ? 'bg-amber-500/20 text-amber-400 border-2 border-amber-500/40'
-              : 'bg-rose-500/20 text-rose-400 border-2 border-rose-500/40 animate-pulse'
+              ? 'bg-amber-950/60 text-amber-400 border-amber-500/50 shadow-amber-950/40'
+              : 'bg-rose-950/80 text-rose-300 border-rose-500/60 shadow-rose-950/60 animate-pulse'
           }`}
         >
           {completedResult.estadoResultante === 'operativo' ? (
-            <CheckCircle2 size={40} />
+            <CheckCircle2 size={42} />
           ) : completedResult.estadoResultante === 'observado' ? (
-            <AlertTriangle size={40} />
+            <AlertTriangle size={42} />
           ) : (
-            <ShieldAlert size={40} />
+            <ShieldAlert size={42} />
           )}
         </div>
 
-        <div className="space-y-2">
-          <h1 className="text-2xl sm:text-3xl font-black text-white">
+        <div className="space-y-1.5">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+            Checklist Registrado Exitosamente
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
             Inspección TPM Finalizada
           </h1>
-          <p className="text-sm text-slate-300">
-            Autoelevador Interno #{equipo.interno} ({equipo.marca} {equipo.modelo})
+          <p className="text-sm text-slate-300 font-medium">
+            Autoelevador Interno #{equipo.interno} — {equipo.marca} {equipo.modelo}
           </p>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 text-left space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="bg-[#111724] border border-slate-800 rounded-2xl p-5 text-left space-y-3.5 shadow-xl">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Estado Resultante del Equipo
+              Estado Resultante en Sistema
             </span>
             <StatusBadge estado={completedResult.estadoResultante} size="md" />
           </div>
 
           <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
-              <span className="text-slate-500 font-medium">Horómetro Registrado</span>
-              <p className="font-bold text-white text-sm mt-0.5">{horometroParam || equipo.horometro_actual} hs</p>
+            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
+              <span className="text-slate-400 font-medium block">Horómetro Registrado</span>
+              <p className="font-mono font-tabular font-black text-white text-base mt-0.5">
+                {horometroParam || equipo.horometro_actual} hs
+              </p>
             </div>
-            <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
-              <span className="text-slate-500 font-medium">Fallas Reportadas</span>
-              <p className={`font-bold text-sm mt-0.5 ${completedResult.fallasCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
+              <span className="text-slate-400 font-medium block">Fallas Reportadas</span>
+              <p className={`font-black text-base mt-0.5 ${completedResult.fallasCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
                 {completedResult.fallasCount} defecto(s)
               </p>
             </div>
           </div>
 
           {completedResult.estadoResultante === 'fuera_de_servicio' && (
-            <div className="bg-rose-500/15 border border-rose-500/30 rounded-xl p-3 text-rose-300 text-xs flex items-start gap-2">
-              <ShieldAlert size={16} className="text-rose-400 shrink-0 mt-0.5" />
+            <div className="bg-rose-950/40 border border-rose-500/40 rounded-xl p-3.5 text-rose-200 text-xs flex items-start gap-2.5">
+              <ShieldAlert size={18} className="text-rose-400 shrink-0 mt-0.5" />
               <span>
-                <strong>Aviso de Seguridad:</strong> Se detectaron fallas críticas. No opere el equipo y notifique de inmediato al supervisor de turno.
+                <strong className="text-rose-300 block mb-0.5 uppercase tracking-wider font-bold">
+                  Parada de Máquina Requerida
+                </strong>
+                Se detectaron fallas críticas de seguridad. No opere el autoelevador y notifique de inmediato a la guardia de mantenimiento.
               </span>
             </div>
           )}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-3 pt-2">
+        <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
           <Link
             href="/"
-            className="flex-1 py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20"
+            className="flex-1 min-h-[48px] py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 btn-tactile cursor-pointer"
           >
             <span>Escanear Otro Equipo</span>
           </Link>
           <Link
             href="/dashboard"
-            className="flex-1 py-3.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-700"
+            className="flex-1 min-h-[48px] py-3 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-800 btn-tactile cursor-pointer"
           >
             <span>Ver en Dashboard</span>
           </Link>
@@ -459,38 +484,38 @@ export default function InspeccionChecklistPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-4 sm:py-6 w-full space-y-4 pb-28">
+    <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full space-y-4 pb-32">
       {/* Top Header info */}
-      <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
         <button
           onClick={() => router.push(`/equipo/${equipo.qr_codigo}`)}
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer btn-tactile"
         >
-          <ArrowLeft size={14} /> Ficha Interno #{equipo.interno}
+          <ArrowLeft size={14} /> <span>Ficha Interno #{equipo.interno}</span>
         </button>
 
         <div className="flex items-center gap-2 text-xs">
-          <span className="flex items-center gap-1 text-slate-400">
+          <span className="flex items-center gap-1.5 text-slate-300 font-mono font-tabular font-bold bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800">
             <Gauge size={13} className="text-amber-400" />
-            <strong className="text-slate-200">{horometroParam || equipo.horometro_actual} hs</strong>
+            <span>{horometroParam || equipo.horometro_actual} hs</span>
           </span>
-          <span className="text-slate-600">|</span>
-          <span className="flex items-center gap-1 text-slate-400 truncate max-w-[120px] sm:max-w-none">
+          <span className="text-slate-600 hidden sm:inline">•</span>
+          <span className="hidden sm:flex items-center gap-1.5 text-slate-400">
             <User size={13} className="text-slate-500" />
-            {operadorNombre}
+            <span className="truncate max-w-[140px]">{operadorNombre}</span>
           </span>
         </div>
       </div>
 
       {/* Progress & Live State Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md space-y-3">
+      <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 shadow-md space-y-2.5">
         <div className="flex items-center justify-between">
           <div>
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              Progreso del Checklist
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+              Avance del Checklist
             </span>
-            <div className="text-base font-extrabold text-white">
-              {answeredCount} de {totalItems} ítems respondidos
+            <div className="text-sm sm:text-base font-black text-white font-mono font-tabular">
+              {answeredCount} de {totalItems} ítems respondidos ({progressPercent}%)
             </div>
           </div>
 
@@ -535,9 +560,9 @@ export default function InspeccionChecklistPage() {
               key={sec.name}
               type="button"
               onClick={() => setActiveSectionIndex(idx)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-2 cursor-pointer border shrink-0 ${
+              className={`min-h-[38px] px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition flex items-center gap-2 cursor-pointer border shrink-0 btn-tactile ${
                 isCurrent
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
                   : hasFailure
                   ? 'bg-rose-950/40 text-rose-300 border-rose-800/60'
                   : secAnswered === secItems.length
@@ -547,10 +572,10 @@ export default function InspeccionChecklistPage() {
             >
               <span>{sec.name}</span>
               <span
-                className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                className={`text-[10px] px-1.5 py-0.2 rounded-md font-mono font-tabular ${
                   isCurrent
-                    ? 'bg-slate-950 text-amber-300'
-                    : 'bg-slate-800 text-slate-400'
+                    ? 'bg-slate-950 text-amber-300 font-bold'
+                    : 'bg-slate-950 text-slate-400'
                 }`}
               >
                 {secAnswered}/{secItems.length}
@@ -563,11 +588,11 @@ export default function InspeccionChecklistPage() {
       {/* Current Section Items List */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
-          <h2 className="text-sm font-black uppercase tracking-wider text-amber-400 flex items-center gap-2">
+          <h2 className="text-xs sm:text-sm font-black uppercase tracking-wider text-amber-400 flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-400" />
-            {currentSection.name}
+            <span>{currentSection.name}</span>
           </h2>
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-slate-500 font-mono">
             Sección {activeSectionIndex + 1} de {sections.length}
           </span>
         </div>
@@ -580,19 +605,19 @@ export default function InspeccionChecklistPage() {
           return (
             <div
               key={item.id}
-              className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 transition shadow-sm ${
+              className={`bg-[#111724] border rounded-2xl p-4 sm:p-5 transition shadow-xs space-y-3 ${
                 isFalla
-                  ? 'border-rose-500/60 bg-rose-950/10'
+                  ? 'border-rose-500/60 bg-rose-950/15'
                   : isOk
-                  ? 'border-emerald-500/40 bg-slate-900'
+                  ? 'border-emerald-500/40 bg-[#111724]'
                   : 'border-slate-800'
               }`}
             >
               {/* Item Header */}
-              <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-start justify-between gap-3">
                 <div className="flex-1">
-                  <span className="text-[11px] font-mono text-slate-500 font-semibold block mb-0.5">
-                    Ítem #{item.orden}
+                  <span className="text-[10px] font-mono text-slate-500 font-semibold block mb-0.5">
+                    ÍTEM #{item.orden}
                   </span>
                   <h3 className="font-bold text-sm sm:text-base text-white leading-snug">
                     {item.etiqueta}
@@ -604,22 +629,22 @@ export default function InspeccionChecklistPage() {
                 )}
               </div>
 
-              {/* Input for Boolean Items */}
+              {/* Input for Boolean Items (Industrial XL Tactile Buttons) */}
               {item.tipo_dato === 'booleano' && (
                 <div>
                   {!isFalla ? (
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
                       {/* OK Button */}
                       <button
                         type="button"
                         onClick={() => handleMarkOk(item.id)}
-                        className={`py-3 px-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer border ${
+                        className={`min-h-[52px] py-3 px-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition cursor-pointer border btn-tactile ${
                           isOk
                             ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md shadow-emerald-950'
-                            : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300 border-slate-700/80'
+                            : 'bg-slate-900 hover:bg-slate-800 text-slate-200 border-slate-750'
                         }`}
                       >
-                        <Check size={18} className={isOk ? 'stroke-[3]' : ''} />
+                        <Check size={19} className={isOk ? 'stroke-[3]' : ''} />
                         <span>OK / CONFORME</span>
                       </button>
 
@@ -627,10 +652,10 @@ export default function InspeccionChecklistPage() {
                       <button
                         type="button"
                         onClick={() => handleOpenFallaModal(item)}
-                        className="py-3 px-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer border bg-slate-800/80 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-700/60 text-slate-300 border-slate-700/80"
+                        className="min-h-[52px] py-3 px-4 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition cursor-pointer border bg-slate-900 hover:bg-rose-950/50 hover:text-rose-300 hover:border-rose-500/60 text-slate-300 border-slate-750 btn-tactile"
                       >
                         <AlertTriangle size={18} />
-                        <span>FALLA</span>
+                        <span>REPORTAR FALLA</span>
                       </button>
                     </div>
                   ) : (
@@ -657,14 +682,14 @@ export default function InspeccionChecklistPage() {
                         <button
                           type="button"
                           onClick={() => handleOpenFallaModal(item)}
-                          className="text-xs font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg bg-slate-900 border border-slate-800"
+                          className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer py-1.5 px-2.5 rounded-lg bg-slate-900 border border-slate-800 btn-tactile"
                         >
                           <Edit2 size={12} /> Modificar Falla
                         </button>
                         <button
                           type="button"
                           onClick={() => handleMarkOk(item.id)}
-                          className="text-xs font-semibold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer py-1 px-2 rounded-lg bg-slate-900 border border-slate-800 ml-auto"
+                          className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1 cursor-pointer py-1.5 px-2.5 rounded-lg bg-slate-900 border border-slate-800 ml-auto btn-tactile"
                         >
                           <Check size={12} /> Marcar como OK
                         </button>
@@ -680,14 +705,14 @@ export default function InspeccionChecklistPage() {
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
-                      placeholder="Ingrese valor numérico (%)"
+                      placeholder="Ingrese porcentaje (%)"
                       value={resp?.valor_numero !== null ? resp?.valor_numero : ''}
                       onChange={(e) =>
                         handleNumberChange(item.id, parseFloat(e.target.value) || 0)
                       }
-                      className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      className="flex-1 bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl px-4 py-3 text-sm text-white font-mono font-tabular focus:outline-none focus:ring-1 focus:ring-amber-500"
                     />
-                    <span className="text-xs font-bold text-slate-400">%</span>
+                    <span className="text-xs font-bold text-slate-400 font-mono">%</span>
                   </div>
                   {/* Quick percentage buttons */}
                   <div className="flex gap-2">
@@ -696,10 +721,10 @@ export default function InspeccionChecklistPage() {
                         key={pct}
                         type="button"
                         onClick={() => handleNumberChange(item.id, pct)}
-                        className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                        className={`flex-1 min-h-[38px] py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer btn-tactile ${
                           resp?.valor_numero === pct
-                            ? 'bg-amber-500 text-slate-950 border-amber-400'
-                            : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 font-mono font-bold'
+                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800 font-mono'
                         }`}
                       >
                         {pct}%
@@ -717,7 +742,7 @@ export default function InspeccionChecklistPage() {
                     placeholder="Observaciones o notas adicionales del turno..."
                     value={resp?.valor_texto || ''}
                     onChange={(e) => handleTextChange(item.id, e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl p-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed"
                   />
                 </div>
               )}
@@ -726,15 +751,15 @@ export default function InspeccionChecklistPage() {
         })}
       </div>
 
-      {/* Navigation and Submission bottom bar */}
-      <div className="fixed bottom-0 left-0 right-0 bg-slate-900/95 backdrop-blur-md border-t border-slate-800 p-3 sm:p-4 z-40">
+      {/* Navigation and Submission bottom bar with Safe Area Insets */}
+      <div className="fixed bottom-0 left-0 right-0 bg-[#0e1420]/95 backdrop-blur-md border-t border-slate-800 p-3 sm:p-4 z-40 pb-safe">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
           {/* Previous Section */}
           <button
             type="button"
             disabled={activeSectionIndex === 0}
             onClick={() => setActiveSectionIndex((prev) => Math.max(0, prev - 1))}
-            className="py-3 px-4 rounded-xl border border-slate-700 text-slate-300 font-bold text-xs sm:text-sm flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800 transition cursor-pointer"
+            className="min-h-[46px] py-2.5 px-4 rounded-xl border border-slate-700 text-slate-300 font-bold text-xs sm:text-sm flex items-center gap-1 disabled:opacity-30 disabled:pointer-events-none hover:bg-slate-800 transition cursor-pointer btn-tactile"
           >
             <ChevronLeft size={16} />
             <span className="hidden sm:inline">Anterior</span>
@@ -747,7 +772,7 @@ export default function InspeccionChecklistPage() {
               onClick={() =>
                 setActiveSectionIndex((prev) => Math.min(sections.length - 1, prev + 1))
               }
-              className="py-3 px-6 bg-slate-800 hover:bg-slate-750 text-amber-400 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-1.5 border border-amber-500/30 cursor-pointer"
+              className="min-h-[46px] py-2.5 px-6 bg-slate-900 hover:bg-slate-800 text-amber-400 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-1.5 border border-amber-500/40 cursor-pointer btn-tactile shadow-xs"
             >
               <span>Siguiente Sección</span>
               <ChevronRight size={16} />
@@ -757,14 +782,15 @@ export default function InspeccionChecklistPage() {
               type="button"
               disabled={isSubmitting}
               onClick={handleSubmitInspection}
-              className="py-3 px-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 disabled:opacity-50 cursor-pointer"
+              className="min-h-[46px] py-2.5 px-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 disabled:opacity-50 cursor-pointer btn-tactile"
             >
               <Send size={16} />
-              <span>{isSubmitting ? 'Guardando...' : 'Finalizar Inspección'}</span>
+              <span>{isSubmitting ? 'Guardando en Sistema...' : 'Finalizar Inspección'}</span>
             </button>
           )}
         </div>
       </div>
+
 
       {/* Modal de Falla */}
       {modalItem && (

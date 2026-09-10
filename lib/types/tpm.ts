@@ -39,6 +39,7 @@ export interface ChecklistItemResponse {
 }
 
 export interface InspeccionPayload {
+  client_generated_id?: string;
   equipo_id: string;
   operador_id: string;
   template_id: string;
@@ -54,6 +55,8 @@ export interface OfflineQueuedInspeccion {
   timestamp: number;
   payload: InspeccionPayload;
   retryCount: number;
+  lastError?: string;
+  isFatal?: boolean;
 }
 
 export interface InspeccionConDetalle extends Inspeccion {

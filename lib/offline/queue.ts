@@ -29,9 +29,11 @@ function openDB(): Promise<IDBDatabase> {
  * Encola una inspección terminada en IndexedDB si no hay conexión o falla el envío.
  */
 export async function enqueueInspeccion(payload: InspeccionPayload): Promise<OfflineQueuedInspeccion> {
+  // Asegurar que la inspección mantenga su client_generated_id único
+  payload.client_generated_id = payload.client_generated_id || crypto.randomUUID();
   const db = await openDB();
   const queueItem: OfflineQueuedInspeccion = {
-    id: 'local_' + crypto.randomUUID(),
+    id: 'local_' + payload.client_generated_id,
     timestamp: Date.now(),
     payload,
     retryCount: 0,
@@ -97,21 +99,37 @@ export async function removeQueuedInspeccion(id: string): Promise<void> {
 
 /**
  * Sincroniza todas las inspecciones pendientes ejecutando una función de sincronización.
+ * Evita bucles infinitos descartando errores fatales de validación de negocio.
  */
 export async function processOfflineQueue(
-  syncFn: (item: InspeccionPayload) => Promise<boolean>
-): Promise<{ total: number; synced: number; failed: number }> {
+  syncFn: (item: InspeccionPayload) => Promise<boolean | { success: boolean; isFatal?: boolean; error?: string }>
+): Promise<{ total: number; synced: number; failed: number; fatal: number }> {
   const items = await getQueuedInspecciones();
   let synced = 0;
   let failed = 0;
+  let fatal = 0;
 
   for (const item of items) {
     try {
-      const success = await syncFn(item.payload);
-      if (success) {
+      const res = await syncFn(item.payload);
+      const isSuccess = typeof res === 'boolean' ? res : res.success;
+      const isFatal = typeof res === 'object' && Boolean(res.isFatal);
+
+      if (isSuccess) {
         await removeQueuedInspeccion(item.id);
         synced++;
+      } else if (isFatal) {
+        console.error(`Error fatal de validación en inspección ${item.id}:`, typeof res === 'object' ? res.error : '');
+        await removeQueuedInspeccion(item.id);
+        fatal++;
       } else {
+        item.retryCount = (item.retryCount || 0) + 1;
+        item.lastError = typeof res === 'object' ? res.error : undefined;
+        if (item.retryCount >= 5) {
+          console.warn(`Inspección ${item.id} descartada de la cola local tras 5 reintentos fallidos`);
+          await removeQueuedInspeccion(item.id);
+          fatal++;
+        }
         failed++;
       }
     } catch {
@@ -119,5 +137,5 @@ export async function processOfflineQueue(
     }
   }
 
-  return { total: items.length, synced, failed };
+  return { total: items.length, synced, failed, fatal };
 }

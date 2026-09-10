@@ -278,6 +278,7 @@ export async function saveMockInspeccion(payload: InspeccionPayload): Promise<{ 
 
   const newInspeccion: Inspeccion = {
     id: inspeccionId,
+    client_generated_id: payload.client_generated_id || null,
     equipo_id: payload.equipo_id,
     operador_id: payload.operador_id,
     template_id: payload.template_id,

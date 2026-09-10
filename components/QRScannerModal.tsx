@@ -170,8 +170,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
           )}
         </div>
 
-        {/* Manual Input & Quick Badges Bar */}
-        <div className="p-4 bg-slate-900 border-t border-slate-800 space-y-3">
+        {/* Manual Input Bar - Production Ready (Sin accesos rápidos de prueba) */}
+        <div className="p-4 bg-[#0e1420] border-t border-slate-800/80 space-y-2.5">
+          <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+            <span>Ingreso Manual de Código</span>
+            <span className="text-[10px] text-slate-500 font-mono">Teclado o Pistola</span>
+          </div>
+
           <form onSubmit={handleManualSubmit} className="flex gap-2">
             <input
               type="text"
@@ -179,39 +184,21 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
               onChange={(e) => setManualInput(e.target.value)}
               placeholder={
                 mode === 'operador'
-                  ? 'Código QR o Legajo (ej: TPM:OP:4029:op4029pass o 4029)'
-                  : 'Código QR de equipo (ej: AE-01 o 01)'
+                  ? 'Legajo o credencial (ej: 4029)'
+                  : 'Código o Interno (ej: AE-01 o 01)'
               }
-              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="flex-1 bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 font-mono font-bold focus:outline-none focus:ring-1 focus:ring-amber-500"
             />
             <button
               type="submit"
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition cursor-pointer"
+              className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition cursor-pointer btn-tactile shadow-xs"
             >
               Confirmar
             </button>
           </form>
-
-          {/* Acceso rápido para pruebas de equipos */}
-          <div className="pt-1">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-              Autoelevadores de prueba:
-            </span>
-            <div className="flex flex-wrap gap-1.5">
-              {['AE-01', 'AE-02', 'AE-03', 'AE-04'].map((code) => (
-                <button
-                  key={code}
-                  type="button"
-                  onClick={() => onScanSuccess(code)}
-                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
-                >
-                  🚜 {code}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
   );
 };
+

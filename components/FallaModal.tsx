@@ -107,55 +107,56 @@ export const FallaModal: React.FC<FallaModalProps> = ({
           {/* Gravedad Selector */}
           <div>
             <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-              Nivel de Gravedad <span className="text-rose-400">*</span>
+              Nivel de Severidad / Impacto en Operación <span className="text-rose-400">*</span>
             </label>
             <div className="grid grid-cols-3 gap-2">
               {/* Leve */}
               <button
                 type="button"
                 onClick={() => setGravedad('leve')}
-                className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition cursor-pointer ${
+                className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition cursor-pointer btn-tactile ${
                   gravedad === 'leve'
-                    ? 'bg-yellow-500/20 border-yellow-500 text-yellow-300 ring-2 ring-yellow-500/40'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:border-slate-600'
+                    ? 'bg-yellow-950/70 border-yellow-500 text-yellow-300 ring-2 ring-yellow-500/40 shadow-xs'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
-                <Info size={18} className={gravedad === 'leve' ? 'text-yellow-400' : ''} />
+                <Info size={18} className={gravedad === 'leve' ? 'text-yellow-400' : 'text-slate-500'} />
                 <span className="font-bold text-xs">Leve</span>
-                <span className="text-[10px] text-slate-400 leading-tight">Observación menor</span>
+                <span className="text-[10px] text-slate-400 leading-tight">No detiene uso</span>
               </button>
 
               {/* Media */}
               <button
                 type="button"
                 onClick={() => setGravedad('media')}
-                className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition cursor-pointer ${
+                className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition cursor-pointer btn-tactile ${
                   gravedad === 'media'
-                    ? 'bg-orange-500/20 border-orange-500 text-orange-300 ring-2 ring-orange-500/40'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:border-slate-600'
+                    ? 'bg-orange-950/70 border-orange-500 text-orange-300 ring-2 ring-orange-500/40 shadow-xs'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
-                <AlertTriangle size={18} className={gravedad === 'media' ? 'text-orange-400' : ''} />
+                <AlertTriangle size={18} className={gravedad === 'media' ? 'text-orange-400' : 'text-slate-500'} />
                 <span className="font-bold text-xs">Media</span>
-                <span className="text-[10px] text-slate-400 leading-tight">Equipo Observado</span>
+                <span className="text-[10px] text-amber-300/80 leading-tight">Observado</span>
               </button>
 
               {/* Crítica */}
               <button
                 type="button"
                 onClick={() => setGravedad('critica')}
-                className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition cursor-pointer ${
+                className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition cursor-pointer btn-tactile ${
                   gravedad === 'critica'
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-300 ring-2 ring-rose-500/40'
-                    : 'bg-slate-800/60 border-slate-700 text-slate-400 hover:border-slate-600'
+                    ? 'bg-rose-950/90 border-rose-500 text-rose-200 ring-2 ring-rose-500/40 shadow-md shadow-rose-950/60'
+                    : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
-                <AlertOctagon size={18} className={gravedad === 'critica' ? 'text-rose-400' : ''} />
-                <span className="font-bold text-xs">Crítica</span>
-                <span className="text-[10px] text-rose-300 leading-tight">Fuera de Servicio</span>
+                <AlertOctagon size={18} className={gravedad === 'critica' ? 'text-rose-400 animate-pulse' : 'text-slate-500'} />
+                <span className="font-black text-xs text-rose-300">Crítica</span>
+                <span className="text-[10px] text-rose-400 font-bold leading-tight uppercase">Parada de Máquina</span>
               </button>
             </div>
           </div>
+
 
           {/* Descripción */}
           <div>
