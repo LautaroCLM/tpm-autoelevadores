@@ -8,6 +8,7 @@ import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
 import { Equipo, Perfil, InspeccionConDetalle } from '../../../lib/types/tpm';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { MantenimientoBadge } from '../../../components/MantenimientoBadge';
+import { EquipoQRModal } from '../../../components/EquipoQRModal';
 import { formatDate } from '../../../lib/utils';
 import { extractEquipoCode } from '../../../lib/utils/auth-helpers';
 import {
@@ -32,6 +33,7 @@ import {
   XCircle,
   History,
   Wrench,
+  QrCode,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { calcularEstadoMantenimiento } from '../../../lib/utils/mantenimiento';
@@ -50,6 +52,7 @@ export default function EquipoFichaPage() {
   const [loadingInspecciones, setLoadingInspecciones] = useState(true);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [previewFotoUrl, setPreviewFotoUrl] = useState<string | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -204,7 +207,18 @@ export default function EquipoFichaPage() {
               </div>
             </div>
             <div className="flex flex-col items-end gap-2 shrink-0">
-              <StatusBadge estado={equipo.estado} size="md" />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowQrModal(true)}
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-slate-700 hover:border-amber-400 shadow-sm active:scale-95 cursor-pointer"
+                  title="Ver y descargar código QR"
+                >
+                  <QrCode size={13} />
+                  <span>Ver QR</span>
+                </button>
+                <StatusBadge estado={equipo.estado} size="md" />
+              </div>
               <MantenimientoBadge
                 horometroActual={equipo.horometro_actual}
                 proximoMantenimiento={equipo.horometro_proximo_mantenimiento}
@@ -726,6 +740,13 @@ export default function EquipoFichaPage() {
           </div>
         </div>
       )}
+
+      {/* Modal para Visualizar y Descargar QR Grande */}
+      <EquipoQRModal
+        isOpen={showQrModal}
+        onClose={() => setShowQrModal(false)}
+        equipo={equipo}
+      />
     </div>
   );
 }

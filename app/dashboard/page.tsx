@@ -17,6 +17,7 @@ import { Equipo, Inspeccion, Falla, Perfil } from '../../lib/types/tpm';
 import { StatusBadge } from '../../components/StatusBadge';
 import { GravedadBadge } from '../../components/GravedadBadge';
 import { MantenimientoBadge } from '../../components/MantenimientoBadge';
+import { EquipoQRModal } from '../../components/EquipoQRModal';
 import { formatDate } from '../../lib/utils';
 import { calcularEstadoMantenimiento } from '../../lib/utils/mantenimiento';
 import {
@@ -498,10 +499,10 @@ export default function SupervisorDashboardPage() {
                         type="button"
                         onClick={() => setPrintQrEquipo(eq)}
                         className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-slate-200 font-bold text-xs rounded-lg transition flex items-center gap-1 border border-slate-700 cursor-pointer"
-                        title="Ver / Imprimir Código QR"
+                        title="Ver y Descargar Código QR"
                       >
-                        <Printer size={12} />
-                        <span>Imprimir QR</span>
+                        <QrCode size={12} className="text-amber-400" />
+                        <span>Ver QR</span>
                       </button>
 
                       <button
@@ -1095,61 +1096,12 @@ export default function SupervisorDashboardPage() {
         </div>
       )}
 
-      {/* MODAL 4: IMPRIMIR QR DE EQUIPO */}
-      {printQrEquipo && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl space-y-5 text-center">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-white text-sm flex items-center gap-1.5">
-                <QrCode size={16} className="text-amber-400" />
-                Badge QR para Autoelevador
-              </h3>
-              <button
-                onClick={() => setPrintQrEquipo(null)}
-                className="p-1 text-slate-400 hover:text-white"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            {/* Printable Badge Preview */}
-            <div className="bg-white text-slate-950 p-6 rounded-2xl border-4 border-amber-500 space-y-3 shadow-inner">
-              <div className="font-black text-xs tracking-wider uppercase text-slate-600">
-                TPM AUTOELEVADORES
-              </div>
-              <div className="text-3xl font-black tracking-tight text-slate-950">
-                INTERNO #{printQrEquipo.interno}
-              </div>
-              <p className="text-xs font-bold text-slate-700">
-                {printQrEquipo.marca} {printQrEquipo.modelo}
-              </p>
-
-              <div className="w-40 h-40 mx-auto p-1 bg-white border border-slate-300 rounded-xl flex items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`https://qr.local.placeholder/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
-                    printQrEquipo.qr_codigo
-                  )}`}
-                  alt="QR Autoelevador"
-                  className="w-full h-full"
-                />
-              </div>
-
-              <div className="font-mono text-xs font-black tracking-widest text-slate-800">
-                {printQrEquipo.qr_codigo}
-              </div>
-            </div>
-
-            <button
-              onClick={() => window.print()}
-              className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer"
-            >
-              <Printer size={14} />
-              <span>Imprimir Sticker Adhesivo</span>
-            </button>
-          </div>
-        </div>
-      )}
+      {/* MODAL 4: VER / DESCARGAR / IMPRIMIR QR DE EQUIPO */}
+      <EquipoQRModal
+        isOpen={Boolean(printQrEquipo)}
+        onClose={() => setPrintQrEquipo(null)}
+        equipo={printQrEquipo}
+      />
 
       {/* Photo Modal Preview */}
       {selectedPhoto && (

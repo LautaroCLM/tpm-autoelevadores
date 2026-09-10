@@ -9,6 +9,7 @@ import { Equipo, Perfil } from '../lib/types/tpm';
 import { StatusBadge } from '../components/StatusBadge';
 import { MantenimientoBadge } from '../components/MantenimientoBadge';
 import { QRScannerModal } from '../components/QRScannerModal';
+import { EquipoQRModal } from '../components/EquipoQRModal';
 import { extractEquipoCode } from '../lib/utils/auth-helpers';
 import {
   QrCode,
@@ -32,6 +33,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [manualInput, setManualInput] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [selectedQrEquipo, setSelectedQrEquipo] = useState<Equipo | null>(null);
 
   // Estado del usuario activo
   const [perfil, setPerfil] = useState<Perfil | null>(null);
@@ -285,9 +287,25 @@ export default function HomePage() {
                       size="xs"
                     />
                   </div>
-                  <span className="flex items-center gap-1 font-bold text-amber-400 group-hover:translate-x-1 transition-transform">
-                    {perfil ? 'Iniciar TPM' : 'Escanear'} <ArrowRight size={13} />
-                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedQrEquipo(equipo);
+                      }}
+                      className="px-2.5 py-1 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 font-bold text-xs rounded-lg transition flex items-center gap-1 border border-slate-700 hover:border-amber-400 shadow-sm active:scale-95 cursor-pointer"
+                      title={`Ver código QR de Interno #${equipo.interno}`}
+                    >
+                      <QrCode size={13} />
+                      <span>Ver QR</span>
+                    </button>
+
+                    <span className="flex items-center gap-1 font-bold text-amber-400 group-hover:translate-x-0.5 transition-transform">
+                      {perfil ? 'Iniciar TPM' : 'Ficha'} <ArrowRight size={13} />
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -301,6 +319,13 @@ export default function HomePage() {
         mode="equipo"
         onClose={() => setScannerOpen(false)}
         onScanSuccess={handleScanResult}
+      />
+
+      {/* Modal para Visualizar y Descargar QR Grande */}
+      <EquipoQRModal
+        isOpen={Boolean(selectedQrEquipo)}
+        onClose={() => setSelectedQrEquipo(null)}
+        equipo={selectedQrEquipo}
       />
     </div>
   );
