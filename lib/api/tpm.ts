@@ -6,6 +6,7 @@ import {
   Inspeccion,
   Falla,
   InspeccionPayload,
+  InspeccionConDetalle,
 } from '../types/tpm';
 import {
   getMockEquipos,
@@ -14,10 +15,12 @@ import {
   getMockTemplateAndItems,
   saveMockInspeccion,
   getMockInspecciones,
+  getMockInspeccionesByEquipo,
   getMockFallas,
   updateMockFallaEstado,
 } from '../data/mock-db';
 import { enqueueInspeccion } from '../offline/queue';
+import { extractEquipoCode } from '../utils/auth-helpers';
 
 function isSupabaseConfigured(): boolean {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,15 +48,18 @@ export async function fetchEquipos(): Promise<Equipo[]> {
 }
 
 export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> {
+  const cleanCode = extractEquipoCode(qrCodigo);
+  if (!cleanCode) return null;
+
   if (!isSupabaseConfigured()) {
-    return await getMockEquipoByQR(qrCodigo);
+    return await getMockEquipoByQR(cleanCode);
   }
 
   const supabase = createClient();
   const { data, error } = await supabase
     .from('equipos')
     .select('*')
-    .eq('qr_codigo', qrCodigo)
+    .or(`qr_codigo.ilike.${cleanCode},interno.eq.${cleanCode}`)
     .maybeSingle();
 
   if (error) {
@@ -136,6 +142,17 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
 
   try {
     const supabase = createClient();
+
+    // Validar usuario autenticado y asegurar operador_id real
+    const { data: authData } = await supabase.auth.getUser();
+    if (!authData?.user) {
+      return {
+        success: false,
+        queuedOffline: false,
+        error: 'Sesión no válida o expirada. Inicie sesión nuevamente.',
+      };
+    }
+    payload.operador_id = authData.user.id;
 
     // 1. Cabecera de inspección
     const { data: inspData, error: inspError } = await (supabase.from('inspecciones') as any)
@@ -227,24 +244,39 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
 
     return { success: true, inspeccionId };
   } catch (err: any) {
-    console.error('Falla al enviar inspección a Supabase. Encolando en almacenamiento local:', err);
-    // Guardado explícito en IndexedDB sin fingir éxito en servidor
-    try {
-      await enqueueInspeccion(payload);
-      return {
-        success: false,
-        queuedOffline: true,
-        inspeccionId: 'offline-queued',
-        error: err?.message || 'Error de conexión con el servidor',
-      };
-    } catch (queueErr) {
-      console.error('Error crítico al encolar localmente:', queueErr);
-      return {
-        success: false,
-        queuedOffline: false,
-        error: `Error al guardar localmente: ${err?.message}`,
-      };
+    console.error('Error procesando inspección:', err);
+
+    // Solo encolar offline si efectivamente hay un problema de red
+    const isOffline =
+      (typeof navigator !== 'undefined' && !navigator.onLine) ||
+      err?.message?.includes('Failed to fetch') ||
+      err?.message?.includes('NetworkError') ||
+      err?.message?.includes('network');
+
+    if (isOffline) {
+      try {
+        await enqueueInspeccion(payload);
+        return {
+          success: false,
+          queuedOffline: true,
+          inspeccionId: 'offline-queued',
+          error: 'Sin conexión: la inspección se guardó en este dispositivo',
+        };
+      } catch (queueErr) {
+        return {
+          success: false,
+          queuedOffline: false,
+          error: `Error al guardar localmente: ${err?.message}`,
+        };
+      }
     }
+
+    // Error lógico o de base de datos: reportar el error real
+    return {
+      success: false,
+      queuedOffline: false,
+      error: err?.message || 'Error al procesar la inspección en la base de datos',
+    };
   }
 }
 
@@ -266,6 +298,72 @@ export async function fetchInspecciones(): Promise<Inspeccion[]> {
 
   return (data || []) as Inspeccion[];
 }
+
+export async function fetchInspeccionesByEquipo(equipoId: string): Promise<InspeccionConDetalle[]> {
+  if (!isSupabaseConfigured()) {
+    return await getMockInspeccionesByEquipo(equipoId);
+  }
+
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('inspecciones')
+    .select(`
+      *,
+      respuestas_item (
+        *,
+        checklist_items (*),
+        fallas (*)
+      )
+    `)
+    .eq('equipo_id', equipoId)
+    .order('iniciado_en', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching inspecciones by equipo:', error);
+    throw new Error(`Error al consultar historial de inspecciones: ${error.message}`);
+  }
+
+  if (!data || data.length === 0) {
+    return [];
+  }
+
+  // Ordenar respuestas_item según el orden natural de cada ítem de checklist
+  const inspecciones = data.map((insp: any) => {
+    const respuestas = (insp.respuestas_item || []).sort((a: any, b: any) => {
+      const ordenA = a.checklist_items?.orden ?? 999;
+      const ordenB = b.checklist_items?.orden ?? 999;
+      return ordenA - ordenB;
+    });
+    return {
+      ...insp,
+      respuestas_item: respuestas,
+    };
+  });
+
+  // Intentar cargar perfiles de operadores para resolver nombres legibles
+  try {
+    const { data: perfiles } = await (supabase.from('perfiles') as any)
+      .select('id, nombre, legajo');
+
+    if (perfiles && (perfiles as any[]).length > 0) {
+      const perfilMap = new Map((perfiles as any[]).map((p: any) => [p.id, p]));
+      return inspecciones.map((insp: any) => {
+        const p = perfilMap.get(insp.operador_id);
+        return {
+          ...insp,
+          operador_nombre: p?.nombre,
+          operador_legajo: p?.legajo || undefined,
+        };
+      });
+    }
+  } catch (profileErr) {
+    console.warn('No se pudieron consultar perfiles de operador para el historial:', profileErr);
+  }
+
+  return inspecciones as InspeccionConDetalle[];
+}
+
 
 export async function fetchFallas(): Promise<Falla[]> {
   if (!isSupabaseConfigured()) {

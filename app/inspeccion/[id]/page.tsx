@@ -46,7 +46,7 @@ export default function InspeccionChecklistPage() {
 
   const equipoId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const horometroParam = searchParams.get('horometro');
-  const operadorParam = searchParams.get('operador') || 'Operador Planta';
+  const [operadorNombre, setOperadorNombre] = useState<string>('Operador Planta');
 
   const [equipo, setEquipo] = useState<Equipo | null>(null);
   const [template, setTemplate] = useState<ChecklistTemplate | null>(null);
@@ -77,6 +77,21 @@ export default function InspeccionChecklistPage() {
       if (!equipoId) return;
       setLoading(true);
       try {
+        // 1. Validar sesión activa del operario
+        const authInfo = await getCurrentSessionAndProfile();
+        if (!authInfo.user) {
+          toast.error('Debe iniciar sesión para realizar la inspección');
+          const currentUrl = window.location.pathname + window.location.search;
+          router.replace(`/login?redirect=${encodeURIComponent(currentUrl)}`);
+          return;
+        }
+
+        if (authInfo.perfil) {
+          setOperadorNombre(
+            authInfo.perfil.nombre + (authInfo.perfil.legajo ? ` (#${authInfo.perfil.legajo})` : '')
+          );
+        }
+
         const [eqData, tmplData] = await Promise.all([
           fetchEquipoById(equipoId),
           fetchActiveChecklistTemplate(),
@@ -107,7 +122,7 @@ export default function InspeccionChecklistPage() {
       }
     }
     initData();
-  }, [equipoId]);
+  }, [equipoId, router]);
 
   // Agrupamiento de ítems por sección
   const sections = useMemo(() => {
@@ -257,16 +272,20 @@ export default function InspeccionChecklistPage() {
       return;
     }
 
-    // Obtener UUID real del operador autenticado
-    let finalOperadorId: string = searchParams.get('operadorId') || '';
-    if (!finalOperadorId || finalOperadorId === 'op-planta-01') {
-      const authInfo = await getCurrentSessionAndProfile();
-      finalOperadorId = authInfo.user?.id || '33333333-3333-3333-3333-333333333301';
+    // Obtener identidad real del operador desde la sesión activa de Supabase
+    const authInfo = await getCurrentSessionAndProfile();
+    if (!authInfo.user) {
+      toast.error('Sesión no válida o caducada. Por favor inicie sesión nuevamente.');
+      const currentUrl = window.location.pathname + window.location.search;
+      router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
+      return;
     }
+
+    const finalOperadorId = authInfo.user.id;
 
     const payload = {
       equipo_id: equipo.id,
-      operador_id: finalOperadorId as string,
+      operador_id: finalOperadorId,
       template_id: template.id,
       horometro: parseFloat(horometroParam || equipo.horometro_actual.toString()),
       iniciado_en: startTime,
@@ -278,10 +297,10 @@ export default function InspeccionChecklistPage() {
     setIsSubmitting(true);
 
     try {
-      // Si el navegador reporta estar offline
+      // Si el navegador reporta explícitamente estar offline
       if (typeof window !== 'undefined' && !navigator.onLine) {
         await enqueueInspeccion(payload);
-        toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente cuando vuelva la conexión.');
+        toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente al reconectar.');
         setCompletedResult({
           inspeccionId: 'offline-queued',
           estadoResultante: estadoCalculado,
@@ -290,7 +309,7 @@ export default function InspeccionChecklistPage() {
         return;
       }
 
-      // Enviar a la API / Supabase
+      // Enviar a Supabase
       const res = await submitInspeccion(payload);
       if (res.success) {
         toast.success('¡Inspección TPM guardada exitosamente!');
@@ -300,25 +319,35 @@ export default function InspeccionChecklistPage() {
           fallasCount: fallasDetectadas.length,
         });
       } else if (res.queuedOffline) {
-        // Encolado localmente por fallo en Supabase
-        toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente cuando vuelva la conexión.');
+        // Encolado localmente únicamente por corte comprobado de red
+        toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente al reconectar.');
         setCompletedResult({
           inspeccionId: 'offline-queued',
           estadoResultante: estadoCalculado,
           fallasCount: fallasDetectadas.length,
         });
       } else {
-        toast.error(res.error || 'Error al procesar la inspección');
+        // Error de backend / RLS / permisos: mostrar error real y no fingir éxito
+        toast.error(res.error || 'Error al procesar la inspección en el servidor');
       }
     } catch (err: any) {
-      console.error('Submit inspection failed, queuing offline:', err);
-      await enqueueInspeccion(payload);
-      toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente cuando vuelva la conexión.');
-      setCompletedResult({
-        inspeccionId: 'offline-queued',
-        estadoResultante: estadoCalculado,
-        fallasCount: fallasDetectadas.length,
-      });
+      console.error('Submit inspection failed:', err);
+      const isOffline =
+        (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        err?.message?.includes('Failed to fetch') ||
+        err?.message?.includes('network');
+
+      if (isOffline) {
+        await enqueueInspeccion(payload);
+        toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente al reconectar.');
+        setCompletedResult({
+          inspeccionId: 'offline-queued',
+          estadoResultante: estadoCalculado,
+          fallasCount: fallasDetectadas.length,
+        });
+      } else {
+        toast.error(err?.message || 'Error al guardar la inspección');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -448,7 +477,7 @@ export default function InspeccionChecklistPage() {
           <span className="text-slate-600">|</span>
           <span className="flex items-center gap-1 text-slate-400 truncate max-w-[120px] sm:max-w-none">
             <User size={13} className="text-slate-500" />
-            {operadorParam}
+            {operadorNombre}
           </span>
         </div>
       </div>

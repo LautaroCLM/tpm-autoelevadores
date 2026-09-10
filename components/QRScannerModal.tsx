@@ -192,43 +192,22 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             </button>
           </form>
 
-          {/* Quick Presets for Demo / Testing */}
+          {/* Acceso rápido para pruebas de equipos */}
           <div className="pt-1">
             <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
-              {mode === 'operador' ? 'Credenciales de prueba rápida:' : 'Equipos de prueba rápida:'}
+              Autoelevadores de prueba:
             </span>
             <div className="flex flex-wrap gap-1.5">
-              {mode === 'operador' ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => onScanSuccess('TPM:OP:4029:[REDACTADO_TOKEN_OP_4029]')}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition cursor-pointer"
-                  >
-                    🪪 Juan Pérez (Legajo 4029)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onScanSuccess('TPM:OP:5118:[REDACTADO_TOKEN_OP_5118]')}
-                    className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition cursor-pointer"
-                  >
-                    🪪 Carlos Gómez (Legajo 5118)
-                  </button>
-                </>
-              ) : (
-                <>
-                  {['AE-01', 'AE-02', 'AE-03', 'AE-04'].map((code) => (
-                    <button
-                      key={code}
-                      type="button"
-                      onClick={() => onScanSuccess(code)}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
-                    >
-                      🚜 {code}
-                    </button>
-                  ))}
-                </>
-              )}
+              {['AE-01', 'AE-02', 'AE-03', 'AE-04'].map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => onScanSuccess(code)}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition cursor-pointer"
+                >
+                  🚜 {code}
+                </button>
+              ))}
             </div>
           </div>
         </div>

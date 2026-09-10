@@ -3,45 +3,80 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { signInSupervisor, getCurrentSessionAndProfile } from '../../lib/api/auth';
-import { ShieldCheck, Lock, Mail, ArrowRight, ArrowLeft } from 'lucide-react';
+import { signInWithCredentials, getCurrentSessionAndProfile } from '../../lib/api/auth';
+import { sanitizeRedirectUrl } from '../../lib/utils/auth-helpers';
+import { ShieldCheck, Lock, User, ArrowRight, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 function LoginForm() {
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberUser, setRememberUser] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  // Cargar usuario recordado si existe
   useEffect(() => {
-    // Si el usuario ya tiene sesión activa, redirigir automáticamente
+    if (typeof window !== 'undefined') {
+      const savedUser = localStorage.getItem('tpm_remembered_user');
+      if (savedUser) {
+        setIdentifier(savedUser);
+        setRememberUser(true);
+      }
+    }
+  }, []);
+
+  // Si el usuario ya tiene sesión activa válida para hoy, redirigir automáticamente
+  useEffect(() => {
     getCurrentSessionAndProfile().then(({ user, perfil }) => {
-      if (user && (perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento')) {
-        const redirectTo = searchParams?.get('redirectTo') || '/dashboard';
-        window.location.href = redirectTo;
+      if (user) {
+        const rawRedirect = searchParams?.get('redirect') || searchParams?.get('redirectTo');
+        const fallbackTarget =
+          perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
+        const target = sanitizeRedirectUrl(rawRedirect, fallbackTarget);
+        window.location.href = target;
       }
     });
   }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email || !password) {
+    if (!identifier.trim() || !password) {
       toast.error('Complete todos los campos');
       return;
     }
 
     setLoading(true);
     try {
-      const res = await signInSupervisor(email, password);
+      const res = await signInWithCredentials({
+        identifier: identifier.trim(),
+        password,
+      });
+
       if (res.success) {
-        toast.success(`Bienvenido, ${res.perfil?.nombre || 'Supervisor'}`);
+        // Manejar opción "Recordar usuario" (NUNCA se guarda la contraseña)
+        if (typeof window !== 'undefined') {
+          if (rememberUser) {
+            localStorage.setItem('tpm_remembered_user', identifier.trim());
+          } else {
+            localStorage.removeItem('tpm_remembered_user');
+          }
+        }
+
+        toast.success(`Bienvenido, ${res.perfil?.nombre || 'Operador'}`);
+
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
         }
-        const redirectTo = searchParams?.get('redirectTo') || '/dashboard';
-        // Usar window.location.href para forzar navegación completa,
-        // invalidar el client router cache de Next.js y enviar cookies frescas
-        window.location.href = redirectTo;
+
+        // Obtener destino sanitizado
+        const rawRedirect = searchParams?.get('redirect') || searchParams?.get('redirectTo');
+        const defaultTarget =
+          res.perfil?.rol === 'supervisor' || res.perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
+        const targetUrl = sanitizeRedirectUrl(rawRedirect, defaultTarget);
+
+        // window.location.href asegura invalidación del router cache y envío de cookies SSR
+        window.location.href = targetUrl;
       } else {
         toast.error(res.error || 'Credenciales incorrectas');
         setLoading(false);
@@ -52,19 +87,14 @@ function LoginForm() {
     }
   };
 
-  const handleFillDemo = () => {
-    setEmail('supervisor@tpm.com');
-    setPassword('[REDACTADO_PASS_SUPERVISOR]');
-  };
-
   return (
-    <div className="max-w-md mx-auto px-4 py-10 sm:py-16 w-full space-y-6">
+    <div className="max-w-md mx-auto px-4 py-8 sm:py-14 w-full space-y-6">
       <Link
         href="/"
         className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition"
       >
         <ArrowLeft size={14} />
-        <span>Volver al inicio</span>
+        <span>Volver a la página principal</span>
       </Link>
 
       <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6 relative overflow-hidden">
@@ -76,27 +106,27 @@ function LoginForm() {
             <ShieldCheck size={28} />
           </div>
           <h1 className="text-2xl font-black text-white tracking-tight">
-            Acceso Supervisor
+            Acceso TPM Autoelevadores
           </h1>
           <p className="text-xs text-slate-400">
-            Ingreso al Panel de Control de Mantenimiento y Gestión de Flota
+            Identificación de Operadores y Supervisores para mantenimiento preventivo
           </p>
         </div>
 
-        {/* Form */}
+        {/* Formulario */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-              Correo Electrónico
+              Usuario, Legajo o Correo
             </label>
             <div className="relative">
-              <Mail size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+              <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                type="text"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
                 required
-                placeholder="supervisor@empresa.com"
+                placeholder="Ej: 4029 o supervisor@tpm.com"
                 className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
@@ -119,6 +149,19 @@ function LoginForm() {
             </div>
           </div>
 
+          {/* Opción Recordar Usuario */}
+          <div className="flex items-center justify-between pt-1">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={rememberUser}
+                onChange={(e) => setRememberUser(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
+              />
+              <span className="text-xs text-slate-300 font-medium">Recordar usuario</span>
+            </label>
+          </div>
+
           <button
             type="submit"
             disabled={loading}
@@ -129,27 +172,25 @@ function LoginForm() {
           </button>
         </form>
 
-        {/* Demo Credentials Helper */}
-        <div className="pt-4 border-t border-slate-800 text-center space-y-2">
-          <p className="text-[11px] text-slate-400">
-            ¿Probando el sistema? Autocompletar con credenciales de prueba:
+        <div className="pt-3 border-t border-slate-800 text-center">
+          <p className="text-[11px] text-slate-500">
+            La sesión permanecerá activa durante el día de trabajo.
           </p>
-          <button
-            type="button"
-            onClick={handleFillDemo}
-            className="text-xs font-bold text-amber-400 hover:text-amber-300 underline cursor-pointer"
-          >
-            supervisor@tpm.com / [REDACTADO_PASS_SUPERVISOR]
-          </button>
         </div>
       </div>
     </div>
   );
 }
 
-export default function SupervisorLoginPage() {
+export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="max-w-md mx-auto px-4 py-16 text-center text-slate-400 text-sm">Cargando...</div>}>
+    <Suspense
+      fallback={
+        <div className="max-w-md mx-auto px-4 py-16 text-center text-slate-400 text-sm">
+          Cargando formulario de acceso...
+        </div>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

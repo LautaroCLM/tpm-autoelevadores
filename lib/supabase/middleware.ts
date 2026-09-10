@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { Database } from '../types/database';
+import { sanitizeRedirectUrl, isAuthDateToday } from '../utils/auth-helpers';
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -40,22 +41,104 @@ export async function updateSession(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    // Proteger rutas de supervisor /dashboard
-    if (request.nextUrl.pathname.startsWith('/dashboard') && !user) {
+    // 1. Política de expiración "una vez por día"
+    // Si hay un usuario activo, comprobamos si la cookie de fecha corresponde a hoy
+    const sessionDayCookie = request.cookies.get('tpm_session_day')?.value;
+    let isSessionValidToday = Boolean(user);
+
+    if (user && sessionDayCookie && !isAuthDateToday(sessionDayCookie)) {
+      // Ha comenzado un nuevo día: la sesión debe renovarse
+      await supabase.auth.signOut();
+      isSessionValidToday = false;
+    }
+
+    const currentPath = request.nextUrl.pathname;
+
+    // 2. Protección de rutas operativas: /equipo y /inspeccion
+    const isProtectedOperationalRoute =
+      currentPath.startsWith('/equipo') || currentPath.startsWith('/inspeccion');
+
+    if (isProtectedOperationalRoute && !isSessionValidToday) {
+      const targetPath = currentPath + request.nextUrl.search;
       const redirectUrl = request.nextUrl.clone();
       redirectUrl.pathname = '/login';
-      redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname);
+      redirectUrl.search = '';
+      redirectUrl.searchParams.set('redirect', sanitizeRedirectUrl(targetPath, '/'));
+
       const redirectResponse = NextResponse.redirect(redirectUrl);
       supabaseResponse.cookies.getAll().forEach((cookie) => {
         redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
       });
+      // Limpiar cookie de sesión diaria si estaba vencida
+      redirectResponse.cookies.delete('tpm_session_day');
       return redirectResponse;
     }
 
-    // Si ya está autenticado y accede a /login, redirigir directo al dashboard
-    if (request.nextUrl.pathname === '/login' && user) {
-      const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = '/dashboard';
+    // 3. Protección de ruta /dashboard (Solo supervisor y mantenimiento)
+    if (currentPath.startsWith('/dashboard')) {
+      if (!isSessionValidToday) {
+        const targetPath = currentPath + request.nextUrl.search;
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/login';
+        redirectUrl.search = '';
+        redirectUrl.searchParams.set('redirect', sanitizeRedirectUrl(targetPath, '/dashboard'));
+
+        const redirectResponse = NextResponse.redirect(redirectUrl);
+        supabaseResponse.cookies.getAll().forEach((cookie) => {
+          redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+        });
+        return redirectResponse;
+      }
+
+      // Si está autenticado, verificar que NO sea operador
+      const { data: perfil } = await supabase
+        .from('perfiles')
+        .select('rol')
+        .eq('id', user!.id)
+        .maybeSingle();
+
+      const userRole = (perfil as any)?.rol || user!.user_metadata?.rol || 'operador';
+
+      if (userRole !== 'supervisor' && userRole !== 'mantenimiento') {
+        // Operador intentando entrar al dashboard -> expulsar a home
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/';
+        redirectUrl.search = '';
+        redirectUrl.searchParams.set('unauthorized', '1');
+
+        const redirectResponse = NextResponse.redirect(redirectUrl);
+        supabaseResponse.cookies.getAll().forEach((cookie) => {
+          redirectResponse.cookies.set(cookie.name, cookie.value, cookie);
+        });
+        return redirectResponse;
+      }
+    }
+
+    // 4. Si el usuario ya está autenticado e intenta acceder a /login
+    if (currentPath === '/login' && isSessionValidToday) {
+      const rawRedirect =
+        request.nextUrl.searchParams.get('redirect') ||
+        request.nextUrl.searchParams.get('redirectTo');
+
+      let targetUrl = '/';
+      if (rawRedirect) {
+        targetUrl = sanitizeRedirectUrl(rawRedirect, '/');
+      } else {
+        // Redirigir según rol si no hay redirect específico
+        const userRole = user?.user_metadata?.rol;
+        if (userRole === 'supervisor' || userRole === 'mantenimiento') {
+          targetUrl = '/dashboard';
+        } else {
+          targetUrl = '/';
+        }
+      }
+
+      // Evitar loop infinito si el target fuera /login
+      if (targetUrl === '/login') {
+        targetUrl = '/';
+      }
+
+      const redirectUrl = new URL(targetUrl, request.url);
       const redirectResponse = NextResponse.redirect(redirectUrl);
       supabaseResponse.cookies.getAll().forEach((cookie) => {
         redirectResponse.cookies.set(cookie.name, cookie.value, cookie);

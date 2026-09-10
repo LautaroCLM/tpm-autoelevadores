@@ -67,18 +67,20 @@ export const Header: React.FC = () => {
             <span className="hidden sm:inline">Escanear</span>
           </Link>
 
-          <Link
-            href="/dashboard"
-            prefetch={false}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              pathname.startsWith('/dashboard')
-                ? 'bg-amber-500 text-slate-950 shadow-sm'
-                : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300'
-            }`}
-          >
-            <LayoutDashboard size={14} />
-            <span>Supervisor</span>
-          </Link>
+          {(!perfil || perfil.rol === 'supervisor' || perfil.rol === 'mantenimiento') && (
+            <Link
+              href="/dashboard"
+              prefetch={false}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                pathname.startsWith('/dashboard')
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                  : 'bg-slate-800/80 hover:bg-slate-800 text-slate-300'
+              }`}
+            >
+              <LayoutDashboard size={14} />
+              <span>Supervisor</span>
+            </Link>
+          )}
 
           {/* Active User Chip */}
           {perfil ? (

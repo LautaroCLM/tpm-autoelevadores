@@ -16,7 +16,9 @@ import { getCurrentSessionAndProfile, signOutUser } from '../../lib/api/auth';
 import { Equipo, Inspeccion, Falla, Perfil } from '../../lib/types/tpm';
 import { StatusBadge } from '../../components/StatusBadge';
 import { GravedadBadge } from '../../components/GravedadBadge';
+import { MantenimientoBadge } from '../../components/MantenimientoBadge';
 import { formatDate } from '../../lib/utils';
+import { calcularEstadoMantenimiento } from '../../lib/utils/mantenimiento';
 import {
   LayoutDashboard,
   Truck,
@@ -42,6 +44,7 @@ import {
   X,
   Fuel,
   Calendar,
+  Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -77,16 +80,25 @@ export default function SupervisorDashboardPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [authInfo, eqs, insps, fls] = await Promise.all([
-        getCurrentSessionAndProfile(),
+      const authInfo = await getCurrentSessionAndProfile();
+      if (!authInfo.user) {
+        router.replace('/login?redirect=/dashboard');
+        return;
+      }
+
+      if (authInfo.perfil?.rol !== 'supervisor' && authInfo.perfil?.rol !== 'mantenimiento') {
+        toast.error('Acceso denegado: esta sección es exclusiva para supervisores y mantenimiento');
+        router.replace('/');
+        return;
+      }
+
+      setPerfil(authInfo.perfil);
+
+      const [eqs, insps, fls] = await Promise.all([
         fetchEquipos(),
         fetchInspecciones(),
         fetchFallas(),
       ]);
-
-      if (authInfo.perfil) {
-        setPerfil(authInfo.perfil);
-      }
 
       setEquipos(eqs);
       setInspecciones(insps);
@@ -110,6 +122,14 @@ export default function SupervisorDashboardPage() {
   const fallasPendientes = fallas.filter(
     (f) => f.estado_reparacion !== 'cerrado' && f.estado_reparacion !== 'reparado'
   ).length;
+
+  // Estadísticas de mantenimiento preventivo por horómetro
+  const mantenimientoStats = equipos.map((e) =>
+    calcularEstadoMantenimiento(e.horometro_actual, e.horometro_proximo_mantenimiento)
+  );
+  const mantenimientoVencidos = mantenimientoStats.filter((m) => m.nivel === 'vencido').length;
+  const mantenimientoProximos = mantenimientoStats.filter((m) => m.nivel === 'proximo').length;
+  const mantenimientoAlDia = mantenimientoStats.filter((m) => m.nivel === 'al_dia').length;
 
   const handleUpdateFallaStatus = async (
     fallaId: string,
@@ -269,7 +289,7 @@ export default function SupervisorDashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
           <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
             <Truck size={13} /> Total Flota
@@ -302,12 +322,38 @@ export default function SupervisorDashboardPage() {
           <span className="text-[11px] text-slate-500">Falla crítica activa</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm col-span-2 lg:col-span-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
           <span className="text-[11px] font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
             <AlertOctagon size={13} /> Fallas Activas
           </span>
           <div className="text-2xl font-black text-orange-400 mt-1.5">{fallasPendientes}</div>
           <span className="text-[11px] text-slate-500">En cola de reparación</span>
+        </div>
+
+        <div className={`bg-slate-900 border rounded-2xl p-4 shadow-sm ${
+          mantenimientoVencidos > 0
+            ? 'border-rose-500/40 bg-rose-500/5'
+            : mantenimientoProximos > 0
+            ? 'border-amber-500/40 bg-amber-500/5'
+            : 'border-slate-800'
+        }`}>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <Wrench size={13} /> Mantenimiento
+          </span>
+          <div className="flex items-baseline gap-1.5 mt-1.5">
+            <span className={`text-2xl font-black ${mantenimientoVencidos > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+              {mantenimientoVencidos}
+            </span>
+            <span className="text-[11px] text-slate-400 font-semibold">venc.</span>
+            <span className="text-slate-600">/</span>
+            <span className={`text-xl font-bold ${mantenimientoProximos > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+              {mantenimientoProximos}
+            </span>
+            <span className="text-[11px] text-slate-400 font-semibold">próx.</span>
+          </div>
+          <span className="text-[11px] text-slate-500 block mt-0.5">
+            {mantenimientoAlDia} al día de {totalEquipos}
+          </span>
         </div>
       </div>
 
@@ -421,14 +467,27 @@ export default function SupervisorDashboardPage() {
                     <StatusBadge estado={eq.estado} size="sm" />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950/60 p-3 rounded-2xl border border-slate-800/60">
-                    <div>
-                      <span className="text-slate-500 font-medium">Horómetro Actual</span>
-                      <p className="font-bold text-white text-sm mt-0.5">{eq.horometro_actual.toFixed(1)} hs</p>
+                  <div className="bg-slate-950/60 p-3 rounded-2xl border border-slate-800/60 space-y-2 text-xs">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <span className="text-slate-500 font-medium">Horómetro Actual</span>
+                        <p className="font-bold text-white text-sm mt-0.5">{eq.horometro_actual.toFixed(1)} hs</p>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 font-medium">Combustible</span>
+                        <p className="font-bold text-white text-sm mt-0.5">{eq.combustible || 'N/A'}</p>
+                      </div>
                     </div>
-                    <div>
-                      <span className="text-slate-500 font-medium">Combustible</span>
-                      <p className="font-bold text-white text-sm mt-0.5">{eq.combustible || 'N/A'}</p>
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
+                      <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1">
+                        <Wrench size={12} className="text-slate-500" />
+                        <span>Service Preventivo:</span>
+                      </span>
+                      <MantenimientoBadge
+                        horometroActual={eq.horometro_actual}
+                        proximoMantenimiento={eq.horometro_proximo_mantenimiento}
+                        size="xs"
+                      />
                     </div>
                   </div>
 

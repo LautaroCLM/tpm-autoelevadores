@@ -55,3 +55,13 @@ export interface OfflineQueuedInspeccion {
   payload: InspeccionPayload;
   retryCount: number;
 }
+
+export interface InspeccionConDetalle extends Inspeccion {
+  respuestas_item: (RespuestaItem & {
+    checklist_items: ChecklistItem | null;
+    fallas: Falla[];
+  })[];
+  operador_nombre?: string;
+  operador_legajo?: string;
+}
+

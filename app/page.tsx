@@ -7,7 +7,9 @@ import { fetchEquipos } from '../lib/api/tpm';
 import { getCurrentSessionAndProfile, signInOperatorWithQR, signOutUser } from '../lib/api/auth';
 import { Equipo, Perfil } from '../lib/types/tpm';
 import { StatusBadge } from '../components/StatusBadge';
+import { MantenimientoBadge } from '../components/MantenimientoBadge';
 import { QRScannerModal } from '../components/QRScannerModal';
+import { extractEquipoCode } from '../lib/utils/auth-helpers';
 import {
   QrCode,
   Search,
@@ -30,10 +32,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [manualInput, setManualInput] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
-  const [scannerMode, setScannerMode] = useState<'operador' | 'equipo'>('operador');
 
-  // Estado del operador activo
-  const [operador, setOperador] = useState<Perfil | null>(null);
+  // Estado del usuario activo
+  const [perfil, setPerfil] = useState<Perfil | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -43,11 +44,7 @@ export default function HomePage() {
         getCurrentSessionAndProfile(),
       ]);
       setEquipos(eqs);
-      if (authInfo.perfil && authInfo.perfil.rol === 'operador') {
-        setOperador(authInfo.perfil);
-      } else {
-        setOperador(null);
-      }
+      setPerfil(authInfo.perfil);
     } catch (err) {
       console.error('Error loading initial data:', err);
     } finally {
@@ -63,78 +60,40 @@ export default function HomePage() {
     return () => window.removeEventListener('tpm_auth_changed', handleAuthChange);
   }, []);
 
-  // Manejar escaneo o ingreso de credencial de operador
-  const handleOperatorLogin = async (qrCode: string) => {
-    toast.loading('Validando credencial de operador...');
-    const res = await signInOperatorWithQR(qrCode);
-    toast.dismiss();
-
-    if (res.success && res.perfil) {
-      setOperador(res.perfil);
-      setManualInput('');
-      setScannerOpen(false);
-      toast.success(`¡Operador identificado: ${res.perfil.nombre}!`);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-      }
-    } else {
-      toast.error(res.error || 'Credencial no válida');
-    }
-  };
-
   // Manejar selección de autoelevador
-  const handleSelectEquipo = (qrCodigo: string) => {
-    if (!operador) {
-      toast.warning('Primero debes escanear tu credencial de operador');
-      setScannerMode('operador');
-      setScannerOpen(true);
+  const handleSelectEquipo = (rawInput: string) => {
+    const cleanCode = extractEquipoCode(rawInput);
+    if (!cleanCode) {
+      toast.warning('Ingrese o escanee un código de autoelevador válido');
       return;
     }
 
-    const cleanCode = qrCodigo.trim().toUpperCase();
     const match = equipos.find(
-      (eq) => eq.qr_codigo.toUpperCase() === cleanCode || eq.interno === cleanCode
+      (eq) => eq.qr_codigo.toUpperCase() === cleanCode || eq.interno.toUpperCase() === cleanCode
     );
 
-    if (match) {
-      router.push(`/equipo/${match.qr_codigo}`);
-    } else {
-      router.push(`/equipo/${cleanCode}`);
-    }
+    const targetCode = match ? match.qr_codigo : cleanCode;
+    router.push(`/equipo/${encodeURIComponent(targetCode)}`);
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualInput.trim()) return;
-
-    if (!operador) {
-      handleOperatorLogin(manualInput);
-    } else {
-      handleSelectEquipo(manualInput);
-    }
+    handleSelectEquipo(manualInput);
   };
 
-  const handleSwitchOperator = async () => {
+  const handleSignOut = async () => {
     await signOutUser();
-    setOperador(null);
+    setPerfil(null);
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
     }
-    toast.info('Sesión de operador cerrada');
-  };
-
-  const handleOpenScanner = () => {
-    setScannerMode(!operador ? 'operador' : 'equipo');
-    setScannerOpen(true);
+    toast.info('Sesión cerrada correctamente');
   };
 
   const handleScanResult = (code: string) => {
     setScannerOpen(false);
-    if (scannerMode === 'operador') {
-      handleOperatorLogin(code);
-    } else {
-      handleSelectEquipo(code);
-    }
+    handleSelectEquipo(code);
   };
 
   return (
@@ -151,13 +110,13 @@ export default function HomePage() {
             Inspección Diaria de Autoelevadores
           </h1>
           <p className="text-xs sm:text-sm text-slate-300 mt-2 leading-relaxed">
-            Flujo de doble escaneo seguro: identificá tu credencial de operador y luego el código QR del autoelevador asignado.
+            Escaneá el código QR pegado en la máquina para consultar su estado e iniciar el checklist preventivo de tu turno.
           </p>
         </div>
       </div>
 
-      {/* Operador Status Banner */}
-      {operador ? (
+      {/* Estado de Sesión del Usuario */}
+      {perfil ? (
         <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black">
@@ -166,33 +125,46 @@ export default function HomePage() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                  Operador Activo
+                  Sesión Activa ({perfil.rol})
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               </div>
               <p className="text-base font-black text-white">
-                {operador.nombre} {operador.legajo ? `— Legajo #${operador.legajo}` : ''}
+                {perfil.nombre} {perfil.legajo ? `— Legajo #${perfil.legajo}` : ''}
               </p>
             </div>
           </div>
 
           <button
-            onClick={handleSwitchOperator}
+            onClick={handleSignOut}
             className="self-start sm:self-auto px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/50 transition flex items-center gap-1.5 cursor-pointer"
           >
             <LogOut size={13} />
-            <span>Cambiar Operador</span>
+            <span>Cerrar Sesión</span>
           </button>
         </div>
       ) : (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-3 text-amber-200 text-xs sm:text-sm">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-            <QrCode size={18} />
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+              <UserCheck size={20} />
+            </div>
+            <div>
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                Sin sesión activa
+              </span>
+              <p className="text-xs sm:text-sm text-slate-300">
+                Podés iniciar sesión ahora o escanear el código QR del autoelevador para ingresar.
+              </p>
+            </div>
           </div>
-          <div>
-            <strong className="font-bold block text-white">Paso 1: Identificación Requerida</strong>
-            Escaneá tu credencial de operador para habilitar el checklist y registrar tu firma digital.
-          </div>
+          <Link
+            href="/login"
+            className="self-start sm:self-auto px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center gap-1.5 shadow-md shadow-amber-500/10 cursor-pointer"
+          >
+            <UserCheck size={14} />
+            <span>Iniciar Sesión</span>
+          </Link>
         </div>
       )}
 
@@ -200,32 +172,26 @@ export default function HomePage() {
       <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-7 shadow-xl space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <div
-              className={`w-10 h-10 rounded-2xl flex items-center justify-center font-bold shadow-md ${
-                !operador ? 'bg-amber-500 text-slate-950' : 'bg-blue-500 text-white'
-              }`}
-            >
-              {!operador ? <UserCheck size={20} /> : <QrCode size={20} />}
+            <div className="w-10 h-10 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shadow-md">
+              <QrCode size={20} />
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-black text-white">
-                {!operador ? 'Paso 1: Escanear Credencial' : 'Paso 2: Escanear Autoelevador'}
+                Escanear Autoelevador
               </h2>
               <p className="text-xs text-slate-400">
-                {!operador
-                  ? 'Alineá el código QR de tu carnet o credencial'
-                  : 'Alineá el código QR fijado en el autoelevador'}
+                Alineá el código QR del equipo o ingresá su número de interno
               </p>
             </div>
           </div>
 
           <button
             type="button"
-            onClick={handleOpenScanner}
+            onClick={() => setScannerOpen(true)}
             className="py-3 px-5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 cursor-pointer"
           >
             <Camera size={16} />
-            <span>{!operador ? 'Abrir Cámara Credencial' : 'Abrir Cámara Equipo'}</span>
+            <span>Abrir Cámara Escáner</span>
           </button>
         </div>
 
@@ -237,11 +203,7 @@ export default function HomePage() {
               type="text"
               value={manualInput}
               onChange={(e) => setManualInput(e.target.value)}
-              placeholder={
-                !operador
-                  ? 'Ingresar código de credencial o legajo (ej: TPM:OP:4029:op4029pass o 4029)...'
-                  : 'Ingresar código QR de equipo o N° interno (ej: AE-01 o 01)...'
-              }
+              placeholder="Ingresar código QR, interno o URL (ej: AE-01, 01)..."
               className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
             />
           </div>
@@ -249,35 +211,10 @@ export default function HomePage() {
             type="submit"
             className="py-3 px-6 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer"
           >
-            <span>{!operador ? 'Validar Operador' : 'Abrir Equipo'}</span>
+            <span>Abrir Ficha</span>
             <ArrowRight size={14} />
           </button>
         </form>
-
-        {/* Quick Testing Chips */}
-        {!operador && (
-          <div className="pt-2 border-t border-slate-800/80">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-              Acceso rápido para demostración:
-            </span>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => handleOperatorLogin('TPM:OP:4029:[REDACTADO_TOKEN_OP_4029]')}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-amber-300 border border-amber-500/30 transition cursor-pointer"
-              >
-                🪪 Juan Pérez (Legajo 4029)
-              </button>
-              <button
-                type="button"
-                onClick={() => handleOperatorLogin('TPM:OP:5118:[REDACTADO_TOKEN_OP_5118]')}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-amber-300 border border-amber-500/30 transition cursor-pointer"
-              >
-                🪪 Carlos Gómez (Legajo 5118)
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Lista de Equipos en Planta */}
@@ -337,12 +274,19 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs pt-2 border-t border-slate-800/60 text-slate-400 group-hover:text-slate-200">
-                  <span className="font-mono text-[11px] text-amber-500/90 font-medium">
-                    QR: {equipo.qr_codigo}
-                  </span>
+                <div className="flex items-center justify-between text-xs pt-2.5 border-t border-slate-800/60 text-slate-400 group-hover:text-slate-200">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[11px] text-amber-500/90 font-medium">
+                      QR: {equipo.qr_codigo}
+                    </span>
+                    <MantenimientoBadge
+                      horometroActual={equipo.horometro_actual}
+                      proximoMantenimiento={equipo.horometro_proximo_mantenimiento}
+                      size="xs"
+                    />
+                  </div>
                   <span className="flex items-center gap-1 font-bold text-amber-400 group-hover:translate-x-1 transition-transform">
-                    {operador ? 'Iniciar TPM' : 'Escanear'} <ArrowRight size={13} />
+                    {perfil ? 'Iniciar TPM' : 'Escanear'} <ArrowRight size={13} />
                   </span>
                 </div>
               </div>
@@ -354,7 +298,7 @@ export default function HomePage() {
       {/* QR Camera Modal */}
       <QRScannerModal
         isOpen={scannerOpen}
-        mode={scannerMode}
+        mode="equipo"
         onClose={() => setScannerOpen(false)}
         onScanSuccess={handleScanResult}
       />

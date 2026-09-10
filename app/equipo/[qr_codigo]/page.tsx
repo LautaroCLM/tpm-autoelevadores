@@ -3,10 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { fetchEquipoByQR } from '../../../lib/api/tpm';
+import { fetchEquipoByQR, fetchInspeccionesByEquipo } from '../../../lib/api/tpm';
 import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
-import { Equipo, Perfil } from '../../../lib/types/tpm';
+import { Equipo, Perfil, InspeccionConDetalle } from '../../../lib/types/tpm';
 import { StatusBadge } from '../../../components/StatusBadge';
+import { MantenimientoBadge } from '../../../components/MantenimientoBadge';
+import { formatDate } from '../../../lib/utils';
+import { extractEquipoCode } from '../../../lib/utils/auth-helpers';
 import {
   ArrowLeft,
   Truck,
@@ -20,38 +23,66 @@ import {
   CheckCircle,
   FileCheck2,
   UserCheck,
+  ClipboardList,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Image as ImageIcon,
+  CheckCircle2,
+  XCircle,
+  History,
+  Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { calcularEstadoMantenimiento } from '../../../lib/utils/mantenimiento';
 
 export default function EquipoFichaPage() {
   const params = useParams();
   const router = useRouter();
-  const qrCodigo = Array.isArray(params?.qr_codigo) ? params.qr_codigo[0] : (params?.qr_codigo as string);
+  const rawParam = Array.isArray(params?.qr_codigo) ? params.qr_codigo[0] : (params?.qr_codigo as string);
+  const qrCodigo = extractEquipoCode(rawParam);
 
   const [equipo, setEquipo] = useState<Equipo | null>(null);
   const [loading, setLoading] = useState(true);
   const [horometro, setHorometro] = useState<string>('');
   const [operador, setOperador] = useState<Perfil | null>(null);
+  const [inspecciones, setInspecciones] = useState<InspeccionConDetalle[]>([]);
+  const [loadingInspecciones, setLoadingInspecciones] = useState(true);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [previewFotoUrl, setPreviewFotoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     async function init() {
       if (!qrCodigo) return;
       setLoading(true);
       try {
-        const [eqData, authInfo] = await Promise.all([
-          fetchEquipoByQR(decodeURIComponent(qrCodigo)),
-          getCurrentSessionAndProfile(),
-        ]);
+        // Verificar sesión activa
+        const authInfo = await getCurrentSessionAndProfile();
+        if (!authInfo.user) {
+          // No autenticado: preservar destino y redirigir a /login
+          const targetPath = `/equipo/${encodeURIComponent(qrCodigo)}`;
+          router.replace(`/login?redirect=${encodeURIComponent(targetPath)}`);
+          return;
+        }
+
+        setOperador(authInfo.perfil);
+
+        const eqData = await fetchEquipoByQR(qrCodigo);
 
         if (eqData) {
           setEquipo(eqData);
           setHorometro(eqData.horometro_actual.toString());
-        }
 
-        if (authInfo.perfil) {
-          setOperador(authInfo.perfil);
-        } else {
-          toast.warning('No hay operador identificado. Por favor escaneá tu credencial primero.');
+          // Cargar historial de inspecciones de este equipo
+          try {
+            setLoadingInspecciones(true);
+            const history = await fetchInspeccionesByEquipo(eqData.id);
+            setInspecciones(history);
+          } catch (histErr) {
+            console.error('Error fetching historial de inspecciones:', histErr);
+          } finally {
+            setLoadingInspecciones(false);
+          }
         }
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -60,15 +91,27 @@ export default function EquipoFichaPage() {
       }
     }
     init();
-  }, [qrCodigo]);
+  }, [qrCodigo, router]);
+
+  const toggleExpand = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const handleStartInspection = (e: React.FormEvent) => {
     e.preventDefault();
     if (!equipo) return;
 
     if (!operador) {
-      toast.error('Debes escanear tu credencial de operador antes de iniciar el checklist');
-      router.push('/');
+      toast.error('Debe iniciar sesión para realizar la inspección');
+      router.push(`/login?redirect=${encodeURIComponent(`/equipo/${qrCodigo}`)}`);
       return;
     }
 
@@ -84,12 +127,9 @@ export default function EquipoFichaPage() {
       );
     }
 
+    // No transmitimos operadorId por URL: la página de inspección obtiene la identidad real desde la sesión Supabase
     const query = new URLSearchParams({
-      equipoId: equipo.id,
       horometro: numHorometro.toString(),
-      operadorId: operador.id,
-      operadorNombre: operador.nombre,
-      operadorLegajo: operador.legajo || '',
     });
 
     router.push(`/inspeccion/${equipo.id}?${query.toString()}`);
@@ -109,20 +149,27 @@ export default function EquipoFichaPage() {
         <div className="w-16 h-16 rounded-full bg-rose-500/20 text-rose-400 mx-auto flex items-center justify-center">
           <AlertTriangle size={32} />
         </div>
-        <h2 className="text-xl font-bold text-white">Equipo no encontrado</h2>
+        <h2 className="text-xl font-bold text-white">Autoelevador no encontrado</h2>
         <p className="text-sm text-slate-400">
-          No se encontró ningún autoelevador con el código QR o interno <span className="font-mono text-amber-400">{qrCodigo}</span>.
+          No se encontró ningún autoelevador con el código QR o interno <span className="font-mono text-amber-400">{qrCodigo || rawParam}</span>.
         </p>
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-sm rounded-xl transition"
-        >
-          <ArrowLeft size={16} />
-          <span>Volver al inicio</span>
-        </Link>
+        <div className="pt-2">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm rounded-xl transition shadow-lg shadow-amber-500/20"
+          >
+            <ArrowLeft size={16} />
+            <span>Volver a escanear</span>
+          </Link>
+        </div>
       </div>
     );
   }
+
+  const mantenimientoInfo = calcularEstadoMantenimiento(
+    equipo.horometro_actual,
+    equipo.horometro_proximo_mantenimiento
+  );
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 sm:py-8 w-full space-y-6">
@@ -156,7 +203,14 @@ export default function EquipoFichaPage() {
                 </p>
               </div>
             </div>
-            <StatusBadge estado={equipo.estado} size="md" />
+            <div className="flex flex-col items-end gap-2 shrink-0">
+              <StatusBadge estado={equipo.estado} size="md" />
+              <MantenimientoBadge
+                horometroActual={equipo.horometro_actual}
+                proximoMantenimiento={equipo.horometro_proximo_mantenimiento}
+                size="sm"
+              />
+            </div>
           </div>
         </div>
 
@@ -167,6 +221,28 @@ export default function EquipoFichaPage() {
             <div>
               <strong className="font-bold block">ATENCIÓN: Equipo Fuera de Servicio</strong>
               Este equipo posee fallas críticas reportadas pendientes de resolución técnica.
+            </div>
+          </div>
+        )}
+
+        {/* Maintenance Overdue Alert Banner */}
+        {mantenimientoInfo?.nivel === 'vencido' && (
+          <div className="bg-rose-500/15 border-b border-rose-500/30 p-4 flex items-start gap-3 text-rose-300 text-xs sm:text-sm">
+            <Wrench size={20} className="text-rose-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="font-bold block">ALERTA: Mantenimiento Preventivo Vencido</strong>
+              {mantenimientoInfo.labelDetallado}. Coordine el service preventivo con el área técnica.
+            </div>
+          </div>
+        )}
+
+        {/* Maintenance Upcoming Notice Banner */}
+        {mantenimientoInfo?.nivel === 'proximo' && equipo.estado !== 'fuera_de_servicio' && (
+          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 flex items-start gap-3 text-amber-300 text-xs sm:text-sm">
+            <Wrench size={18} className="text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <strong className="font-bold block">Aviso: Mantenimiento Preventivo Próximo</strong>
+              {mantenimientoInfo.labelDetallado}.
             </div>
           </div>
         )}
@@ -192,15 +268,47 @@ export default function EquipoFichaPage() {
             </p>
           </div>
 
-          <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl col-span-2 sm:col-span-1">
-            <span className="text-[11px] uppercase font-bold text-slate-500 flex items-center gap-1">
-              <Calendar size={12} /> Próximo Service
-            </span>
-            <p className="text-base font-black text-amber-400 mt-1">
+          <div
+            className={`p-3 rounded-xl col-span-2 sm:col-span-1 border transition ${
+              mantenimientoInfo?.nivel === 'vencido'
+                ? 'bg-rose-500/10 border-rose-500/40 shadow-sm shadow-rose-950/40'
+                : mantenimientoInfo?.nivel === 'proximo'
+                ? 'bg-amber-500/10 border-amber-500/40'
+                : 'bg-emerald-500/5 border-emerald-500/20'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] uppercase font-bold text-slate-400 flex items-center gap-1">
+                <Wrench size={12} className={mantenimientoInfo?.colorClass.icon || 'text-slate-400'} /> Próximo Service
+              </span>
+              {mantenimientoInfo && (
+                <span
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${mantenimientoInfo.colorClass.badge}`}
+                >
+                  {mantenimientoInfo.labelCorto}
+                </span>
+              )}
+            </div>
+            <p
+              className={`text-base font-black mt-1 ${
+                mantenimientoInfo?.colorClass.text || 'text-amber-400'
+              }`}
+            >
               {equipo.horometro_proximo_mantenimiento
-                ? `${equipo.horometro_proximo_mantenimiento} hs`
+                ? `${equipo.horometro_proximo_mantenimiento.toLocaleString('es-AR')} hs`
                 : 'Programado'}
             </p>
+            {mantenimientoInfo?.diferenciaHoras !== null && (
+              <p className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                {mantenimientoInfo.nivel === 'vencido' ? (
+                  <span className="text-rose-400 font-semibold">
+                    Excedido por {mantenimientoInfo.horasExceso?.toFixed(1)} hs
+                  </span>
+                ) : (
+                  <span>Faltan {mantenimientoInfo.horasRestantes?.toFixed(1)} hs</span>
+                )}
+              </p>
+            )}
           </div>
         </div>
 
@@ -277,6 +385,348 @@ export default function EquipoFichaPage() {
           </button>
         </form>
       </div>
+
+      {/* SECCIÓN: HISTORIAL DE INSPECCIONES DEL EQUIPO */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl">
+        {/* Encabezado del Historial */}
+        <div className="p-5 sm:p-6 border-b border-slate-800 flex items-center justify-between bg-gradient-to-b from-slate-850 to-slate-900">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold">
+              <History size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-black text-white">
+                  Historial de Inspecciones
+                </h2>
+                {!loadingInspecciones && (
+                  <span className="text-xs bg-slate-800 text-amber-400 font-bold px-2 py-0.5 rounded-full border border-slate-700">
+                    {inspecciones.length}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-400">
+                Registros históricos de este autoelevador (más recientes primero)
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Lista de Inspecciones */}
+        <div className="p-5 sm:p-6 space-y-3.5">
+          {loadingInspecciones ? (
+            <div className="py-12 text-center space-y-3">
+              <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-xs text-slate-400">Cargando historial de inspecciones...</p>
+            </div>
+          ) : inspecciones.length === 0 ? (
+            /* Estado Vacío requerido */
+            <div className="bg-slate-950/60 border border-dashed border-slate-800 rounded-2xl p-8 text-center space-y-2">
+              <div className="w-12 h-12 rounded-full bg-slate-800/80 text-slate-500 mx-auto flex items-center justify-center">
+                <ClipboardList size={24} />
+              </div>
+              <h3 className="font-bold text-white text-base">
+                Todavía no se registraron inspecciones para este equipo
+              </h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Cuando un operador realice y finalice el checklist diario para este autoelevador, quedará registrado aquí con el detalle de cada respuesta y sus fotos de evidencia.
+              </p>
+            </div>
+          ) : (
+            inspecciones.map((insp) => {
+              const isExpanded = expandedIds.has(insp.id);
+              const fallas = (insp.respuestas_item || []).flatMap((r) => r.fallas || []);
+              const criticas = fallas.filter((f) => f.gravedad === 'critica').length;
+              const medias = fallas.filter((f) => f.gravedad === 'media').length;
+              const leves = fallas.filter((f) => f.gravedad === 'leve').length;
+
+              const operadorDisplay =
+                insp.operador_nombre
+                  ? `${insp.operador_nombre}${insp.operador_legajo ? ` (Legajo #${insp.operador_legajo})` : ''}`
+                  : operador && operador.id === insp.operador_id
+                  ? `${operador.nombre} (Tú)`
+                  : `Operador #${insp.operador_id.slice(0, 8)}`;
+
+              // Obtener lista única de secciones respetando el orden
+              const seccionesUnicas = Array.from(
+                new Set(
+                  (insp.respuestas_item || []).map(
+                    (r) => r.checklist_items?.seccion || 'General'
+                  )
+                )
+              );
+
+              return (
+                <div
+                  key={insp.id}
+                  className="border border-slate-800 rounded-2xl bg-slate-950/70 overflow-hidden transition hover:border-slate-700"
+                >
+                  {/* Fila Resumen / Toggle de Acordeón */}
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(insp.id)}
+                    className="w-full text-left p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:bg-slate-900/50 transition"
+                  >
+                    <div className="space-y-2 flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-bold text-slate-200">
+                          {formatDate(insp.iniciado_en || insp.finalizado_en)}
+                        </span>
+                        {insp.estado_resultante && (
+                          <StatusBadge estado={insp.estado_resultante} size="sm" />
+                        )}
+
+                        {/* Resumen de Fallas */}
+                        {fallas.length === 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full">
+                            <CheckCircle2 size={12} /> Sin fallas (19/19 OK)
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-300 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-full">
+                            <AlertTriangle size={12} className="text-rose-400" />
+                            {fallas.length} {fallas.length === 1 ? 'falla' : 'fallas'}
+                            {criticas > 0
+                              ? ` (${criticas} Crítica${criticas > 1 ? 's' : ''})`
+                              : medias > 0
+                              ? ` (${medias} Media${medias > 1 ? 's' : ''})`
+                              : ` (${leves} Leve${leves > 1 ? 's' : ''})`}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                        <span className="flex items-center gap-1.5">
+                          <User size={13} className="text-slate-500 shrink-0" />
+                          <span className="truncate">{operadorDisplay}</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <Gauge size={13} className="text-slate-500 shrink-0" />
+                          <span className="font-mono text-slate-300 font-bold">
+                            {insp.horometro.toFixed(1)} hs
+                          </span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80 text-xs font-bold text-amber-400">
+                      <span className="text-[11px] text-slate-400 sm:hidden">
+                        {isExpanded ? 'Ocultar detalle' : 'Ver detalle (19 ítems)'}
+                      </span>
+                      <div className="flex items-center gap-1 bg-slate-900 sm:bg-transparent px-2.5 py-1 rounded-lg">
+                        <span className="hidden sm:inline text-xs">
+                          {isExpanded ? 'Contraer' : 'Ver detalle'}
+                        </span>
+                        {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Panel Detallado Expandible */}
+                  {isExpanded && (
+                    <div className="p-4 sm:p-5 border-t border-slate-800/80 bg-slate-900/40 space-y-5">
+                      {/* 1. SECCIÓN DE FALLAS DETECTADAS (SI EXISTEN) */}
+                      {fallas.length > 0 && (
+                        <div className="space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                            <AlertTriangle size={14} />
+                            Fallas Reportadas en esta Inspección ({fallas.length})
+                          </h4>
+
+                          <div className="grid grid-cols-1 gap-3">
+                            {fallas.map((f, idx) => {
+                              const itemRelacionado = insp.respuestas_item?.find(
+                                (r) => r.fallas && r.fallas.some((rf) => rf.id === f.id)
+                              )?.checklist_items;
+
+                              const badgeColor =
+                                f.gravedad === 'critica'
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                  : f.gravedad === 'media'
+                                  ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
+                                  : 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40';
+
+                              return (
+                                <div
+                                  key={f.id || idx}
+                                  className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row items-start gap-3.5 shadow-sm"
+                                >
+                                  {f.foto_url && (
+                                    <div
+                                      onClick={() => setPreviewFotoUrl(f.foto_url)}
+                                      className="relative w-full sm:w-28 h-28 shrink-0 rounded-lg overflow-hidden border border-slate-700 bg-slate-900 cursor-pointer group"
+                                      title="Clic para ampliar foto"
+                                    >
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={f.foto_url}
+                                        alt="Evidencia de falla"
+                                        className="w-full h-full object-cover group-hover:scale-105 transition duration-200"
+                                      />
+                                      <div className="absolute inset-0 bg-slate-950/50 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-semibold gap-1 transition">
+                                        <ImageIcon size={14} /> Ampliar
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="flex-1 min-w-0 space-y-1.5">
+                                    <div className="flex items-center gap-2">
+                                      <span
+                                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${badgeColor}`}
+                                      >
+                                        {f.gravedad}
+                                      </span>
+                                      {itemRelacionado && (
+                                        <span className="text-xs font-bold text-white">
+                                          {itemRelacionado.etiqueta}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-slate-300 leading-relaxed">
+                                      {f.descripcion || 'Sin descripción ingresada'}
+                                    </p>
+                                    {f.foto_url && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setPreviewFotoUrl(f.foto_url)}
+                                        className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-400 hover:text-amber-300 pt-1 cursor-pointer"
+                                      >
+                                        <ImageIcon size={12} /> Ver fotografía en tamaño completo
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 2. DETALLE COMPLETO DE LOS 19 ÍTEMS */}
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                          <ClipboardList size={14} className="text-amber-400" />
+                          Detalle Completo del Checklist ({insp.respuestas_item?.length || 0} ítems)
+                        </h4>
+
+                        <div className="space-y-3">
+                          {seccionesUnicas.map((sec) => {
+                            const itemsEnSeccion = (insp.respuestas_item || []).filter(
+                              (r) => (r.checklist_items?.seccion || 'General') === sec
+                            );
+
+                            return (
+                              <div
+                                key={sec}
+                                className="bg-slate-950/80 border border-slate-800/80 rounded-xl overflow-hidden"
+                              >
+                                <div className="bg-slate-900/80 px-3.5 py-2 border-b border-slate-800/80 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                                  {sec}
+                                </div>
+                                <div className="divide-y divide-slate-800/60">
+                                  {itemsEnSeccion.map((r) => {
+                                    const item = r.checklist_items;
+                                    return (
+                                      <div
+                                        key={r.id}
+                                        className="p-3 flex items-center justify-between gap-3 text-xs"
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span className="text-[10px] font-mono text-slate-500 shrink-0">
+                                            #{item?.orden || '—'}
+                                          </span>
+                                          <span className="text-slate-200 truncate">
+                                            {item?.etiqueta || 'Ítem de inspección'}
+                                          </span>
+                                        </div>
+
+                                        {/* Valor respondido */}
+                                        <div className="shrink-0">
+                                          {r.es_falla ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                              <XCircle size={12} /> Falla
+                                            </span>
+                                          ) : r.valor_bool === true ? (
+                                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                                              <CheckCircle2 size={12} /> Conforme
+                                            </span>
+                                          ) : r.valor_bool === false ? (
+                                            <span className="text-[10px] font-semibold text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                                              No
+                                            </span>
+                                          ) : r.valor_numero !== null ? (
+                                            <span className="font-mono font-bold text-amber-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                                              {r.valor_numero}
+                                            </span>
+                                          ) : (
+                                            <span className="text-slate-300 max-w-[160px] truncate text-[11px] italic">
+                                              {r.valor_texto || '—'}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* MODAL LIGHTBOX PARA FOTO DE FALLA */}
+      {previewFotoUrl && (
+        <div
+          onClick={() => setPreviewFotoUrl(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 cursor-pointer animate-in fade-in duration-200"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-3xl w-full bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl space-y-3 p-4"
+          >
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <ImageIcon size={16} className="text-amber-400" />
+                Evidencia Fotográfica de Falla
+              </h3>
+              <button
+                type="button"
+                onClick={() => setPreviewFotoUrl(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="max-h-[75vh] overflow-hidden rounded-xl bg-slate-950 flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewFotoUrl}
+                alt="Evidencia ampliada"
+                className="max-h-[75vh] w-auto object-contain rounded-lg"
+              />
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => setPreviewFotoUrl(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg transition cursor-pointer"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

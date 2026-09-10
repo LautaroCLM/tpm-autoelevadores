@@ -1,4 +1,4 @@
-import { Equipo, ChecklistTemplate, ChecklistItem, Inspeccion, Falla, InspeccionPayload } from '../types/tpm';
+import { Equipo, ChecklistTemplate, ChecklistItem, Inspeccion, Falla, InspeccionPayload, InspeccionConDetalle } from '../types/tpm';
 
 export const INITIAL_EQUIPOS: Equipo[] = [
   {
@@ -224,6 +224,7 @@ export const INITIAL_ITEMS: ChecklistItem[] = [
 // Almacenamiento en memoria para modo desarrollo local
 let memoryEquipos: Equipo[] = [...INITIAL_EQUIPOS];
 let memoryInspecciones: Inspeccion[] = [];
+let memoryInspeccionesDetalladas: InspeccionConDetalle[] = [];
 let memoryFallas: Falla[] = [
   {
     id: 'falla-sample-1',
@@ -298,6 +299,8 @@ export async function saveMockInspeccion(payload: InspeccionPayload): Promise<{ 
     };
   }
 
+  const createdFallas: Falla[] = [];
+
   // Registrar fallas
   payload.respuestas.forEach((resp) => {
     if (resp.es_falla && resp.falla) {
@@ -313,14 +316,39 @@ export async function saveMockInspeccion(payload: InspeccionPayload): Promise<{ 
         created_at: new Date().toISOString(),
         resuelto_en: null,
       };
+      createdFallas.push(newFalla);
       memoryFallas.unshift(newFalla);
     }
   });
+
+  const detailedInsp: InspeccionConDetalle = {
+    ...newInspeccion,
+    respuestas_item: payload.respuestas.map((r, idx) => {
+      const itemDef = INITIAL_ITEMS.find((it) => it.id === r.item_id) || null;
+      const respFallas = createdFallas.filter((f) => r.es_falla && f.descripcion === r.falla?.descripcion);
+      return {
+        id: 'resp_item_' + idx + '_' + inspeccionId,
+        inspeccion_id: inspeccionId,
+        item_id: r.item_id,
+        valor_bool: r.valor_bool,
+        valor_numero: r.valor_numero,
+        valor_texto: r.valor_texto,
+        es_falla: r.es_falla,
+        checklist_items: itemDef,
+        fallas: respFallas,
+      };
+    }),
+  };
+  memoryInspeccionesDetalladas.unshift(detailedInsp);
 
   return {
     inspeccionId,
     equipo: memoryEquipos[equipoIndex],
   };
+}
+
+export async function getMockInspeccionesByEquipo(equipoId: string): Promise<InspeccionConDetalle[]> {
+  return memoryInspeccionesDetalladas.filter((i) => i.equipo_id === equipoId);
 }
 
 export async function getMockInspecciones(): Promise<Inspeccion[]> {
