@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { Database } from '../types/database';
-import { sanitizeRedirectUrl, isAuthDateToday } from '../utils/auth-helpers';
+import { sanitizeRedirectUrl, isAuthDateToday, getTodayDateString } from '../utils/auth-helpers';
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -50,6 +50,15 @@ export async function updateSession(request: NextRequest) {
       // Ha comenzado un nuevo día: la sesión debe renovarse
       await supabase.auth.signOut();
       isSessionValidToday = false;
+    } else if (user && !sessionDayCookie) {
+      // Si el usuario está autenticado pero aún no tiene la cookie de sesión diaria,
+      // la inicializamos para la jornada activa en la zona horaria de la planta
+      const today = getTodayDateString();
+      supabaseResponse.cookies.set('tpm_session_day', today, {
+        path: '/',
+        maxAge: 86400,
+        sameSite: 'lax',
+      });
     }
 
     const currentPath = request.nextUrl.pathname;

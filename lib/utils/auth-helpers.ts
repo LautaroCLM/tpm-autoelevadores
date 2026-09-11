@@ -22,6 +22,10 @@ export function sanitizeRedirectUrl(
       !decoded.startsWith('/\\') &&
       !decoded.includes('://')
     ) {
+      // Evitar que el destino sea la propia página de login para evitar bucles de redirección
+      if (decoded === '/login' || decoded.startsWith('/login?') || decoded.startsWith('/login/')) {
+        return fallback === '/login' ? '/' : fallback;
+      }
       return decoded;
     }
   } catch {
@@ -68,20 +72,75 @@ export function extractEquipoCode(rawInput: string | null | undefined): string {
 }
 
 /**
- * Retorna la fecha local actual en formato YYYY-MM-DD para la política de sesión diaria.
+ * Zona horaria oficial de la planta TPM Autoelevadores (Argentina, UTC-3)
  */
-export function getTodayDateString(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+export const PLANT_TIMEZONE = 'America/Argentina/Buenos_Aires';
+
+/**
+ * Retorna la fecha actual de la planta en formato YYYY-MM-DD para la política de sesión diaria.
+ * Utiliza consistentemente la zona horaria de la planta ('America/Argentina/Buenos_Aires', UTC-3)
+ * tanto en cliente como en servidores en la nube (ej: Vercel en UTC) para evitar discrepancias.
+ */
+export function getTodayDateString(timeZone: string = PLANT_TIMEZONE): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  } catch {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
 }
 
 /**
- * Comprueba si una fecha guardada (YYYY-MM-DD) corresponde al día de hoy.
+ * Comprueba si una fecha guardada (YYYY-MM-DD) corresponde a una sesión válida de la jornada.
+ * Retorna true si:
+ * 1. Coincide con la fecha de hoy en la planta.
+ * 2. O si es de la fecha de ayer pero aún estamos dentro de la franja horaria del Turno Noche (antes de las 08:00 AM).
  */
 export function isAuthDateToday(dateString: string | null | undefined): boolean {
   if (!dateString) return false;
-  return dateString.trim() === getTodayDateString();
+  const cleanDate = dateString.trim();
+  const today = getTodayDateString();
+
+  if (cleanDate === today) {
+    return true;
+  }
+
+  // Soporte de jornada de Turno Noche (22:00 a 06:00 / 08:00):
+  // Si la sesión fue iniciada ayer, pero todavía no son las 08:00 AM en la planta,
+  // la jornada nocturna sigue activa.
+  try {
+    const now = new Date();
+    const formatterHour = new Intl.DateTimeFormat('en-CA', {
+      timeZone: PLANT_TIMEZONE,
+      hour: 'numeric',
+      hour12: false,
+    });
+    const currentHour = parseInt(formatterHour.format(now), 10);
+
+    if (currentHour < 8) {
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const yesterdayStr = new Intl.DateTimeFormat('en-CA', {
+        timeZone: PLANT_TIMEZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(yesterday);
+
+      if (cleanDate === yesterdayStr) {
+        return true;
+      }
+    }
+  } catch {
+    // Si falla el formateador, mantener comportamiento estricto
+  }
+
+  return false;
 }

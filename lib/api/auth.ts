@@ -16,7 +16,8 @@ function recordLoginSessionDay() {
   try {
     localStorage.setItem('tpm_session_day', today);
     // Establecer cookie para que el middleware de Next.js también pueda verificar la fecha
-    document.cookie = `tpm_session_day=${today}; path=/; max-age=86400; SameSite=Lax`;
+    const isHttps = window.location.protocol === 'https:';
+    document.cookie = `tpm_session_day=${today}; path=/; max-age=86400; SameSite=Lax${isHttps ? '; Secure' : ''}`;
   } catch (e) {
     console.warn('No se pudo guardar la fecha de sesión diaria:', e);
   }
@@ -29,7 +30,8 @@ function clearLoginSessionDay() {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem('tpm_session_day');
-    document.cookie = 'tpm_session_day=; path=/; max-age=0; SameSite=Lax';
+    const isHttps = window.location.protocol === 'https:';
+    document.cookie = `tpm_session_day=; path=/; max-age=0; SameSite=Lax${isHttps ? '; Secure' : ''}`;
   } catch (e) {
     console.warn('No se pudo limpiar la fecha de sesión:', e);
   }
@@ -112,6 +114,8 @@ export async function signInWithCredentials({
     // Es un legajo numérico (ej: "4029" o "LEG-4029")
     const legajoOnly = cleanId.replace(/^LEG-?/i, '');
     email = `op_${legajoOnly}@tpmplanta.com`;
+  } else {
+    email = cleanId.toLowerCase();
   }
 
   const supabase = createClient();

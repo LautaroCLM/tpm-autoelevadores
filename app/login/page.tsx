@@ -34,7 +34,9 @@ function LoginForm() {
         const fallbackTarget =
           perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
         const target = sanitizeRedirectUrl(rawRedirect, fallbackTarget);
-        window.location.href = target;
+        if (target && target !== '/login') {
+          window.location.href = target;
+        }
       }
     });
   }, [searchParams]);
@@ -74,9 +76,10 @@ function LoginForm() {
         const defaultTarget =
           res.perfil?.rol === 'supervisor' || res.perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
         const targetUrl = sanitizeRedirectUrl(rawRedirect, defaultTarget);
+        const finalTarget = targetUrl === '/login' ? defaultTarget : targetUrl;
 
         // window.location.href asegura invalidación del router cache y envío de cookies SSR
-        window.location.href = targetUrl;
+        window.location.href = finalTarget;
       } else {
         toast.error(res.error || 'Credenciales incorrectas');
         setLoading(false);
