@@ -107,9 +107,17 @@ async function runTests() {
   // TEST 4: Autenticación de Operario con Supabase Auth (Casos 1, 8 y 10)
   console.log('\n4. Verificando autenticación y roles con Supabase Auth (Casos 1, 8 y 10)...');
   const supabase = createClient(supabaseUrl, anonKey);
+  const opEmail = process.env.TEST_OPERATOR_EMAIL || envVars.TEST_OPERATOR_EMAIL || 'op_4029@tpmplanta.com';
+  const opPass = process.env.TEST_OPERATOR_PASSWORD || envVars.TEST_OPERATOR_PASSWORD;
+
+  if (!opPass) {
+    console.log('  ⚠️ TEST_OPERATOR_PASSWORD no configurada en .env.local; salteando pruebas dependientes de login activo.');
+    return;
+  }
+
   const opAuth = await supabase.auth.signInWithPassword({
-    email: 'op_4029@tpmplanta.com',
-    password: '[REDACTADO_TOKEN_OP_4029]',
+    email: opEmail,
+    password: opPass,
   });
 
   assert(!opAuth.error && opAuth.data.user, `Operador autenticado con Supabase Auth: ID ${opAuth.data.user?.id}`);
@@ -149,9 +157,17 @@ async function runTests() {
   // TEST 6: Autenticación de Supervisor con Supabase Auth
   console.log('\n6. Verificando autenticación y rol de Supervisor (Caso 10)...');
   const supClient = createClient(supabaseUrl, anonKey);
+  const supEmail = process.env.TEST_SUPERVISOR_EMAIL || envVars.TEST_SUPERVISOR_EMAIL || 'supervisor@tpm.com';
+  const supPass = process.env.TEST_SUPERVISOR_PASSWORD || envVars.TEST_SUPERVISOR_PASSWORD;
+
+  if (!supPass) {
+    console.log('  ⚠️ TEST_SUPERVISOR_PASSWORD no configurada en .env.local; salteando test de login supervisor.');
+    return;
+  }
+
   const supAuth = await supClient.auth.signInWithPassword({
-    email: 'supervisor@tpm.com',
-    password: '[REDACTADO_PASS_SUPERVISOR]',
+    email: supEmail,
+    password: supPass,
   });
 
   assert(!supAuth.error && supAuth.data.user, `Supervisor autenticado con Supabase Auth: ID ${supAuth.data.user?.id}`);

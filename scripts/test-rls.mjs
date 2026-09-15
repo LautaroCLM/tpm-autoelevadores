@@ -1,4 +1,4 @@
-﻿import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 
 const env = fs.readFileSync('.env.local', 'utf8');
@@ -11,10 +11,18 @@ async function runAudit() {
   console.log('================================================================\n');
 
   // 1. Prueba como Operador (Juan Pérez)
+  const opTestEmail = process.env.TEST_OPERATOR_EMAIL || (env.match(/TEST_OPERATOR_EMAIL=(.*)/)?.[1]?.trim()) || 'op_4029@tpmplanta.com';
+  const opTestPassword = process.env.TEST_OPERATOR_PASSWORD || (env.match(/TEST_OPERATOR_PASSWORD=(.*)/)?.[1]?.trim());
+
+  if (!opTestPassword) {
+    console.log('⚠️ TEST_OPERATOR_PASSWORD no configurada en .env.local. Defina la variable para ejecutar la prueba de RLS.');
+    return;
+  }
+
   const clientOp = createClient(url, anonKey);
   const authOp = await clientOp.auth.signInWithPassword({
-    email: 'op_4029@tpmplanta.com',
-    password: '[REDACTADO_TOKEN_OP_4029]',
+    email: opTestEmail,
+    password: opTestPassword,
   });
 
   if (authOp.error || !authOp.data.user) {
@@ -79,7 +87,89 @@ async function runAudit() {
     await clientAnon.storage.from('fallas-fotos').remove(['test_anon_security.txt']);
   }
 
-  console.log('\n================================================================');
+  // ----------------------------------------------------------------------------
+  // NUEVAS PRUEBAS DE SEGURIDAD ANÓNIMA (Pantalla de inicio sin login)
+  // ----------------------------------------------------------------------------
+  console.log('\n----------------------------------------------------------------');
+  console.log('🌐 VERIFICACIÓN DE ACCESO ANÓNIMO (SIN LOGIN)');
+  console.log('----------------------------------------------------------------');
+
+  // Test E: Anónimo lee operadores para botones de acceso rápido
+  console.log('\n5. Probando SELECT en perfiles con rol = "operador" como ANÓNIMO...');
+  const resAnonOps = await clientAnon
+    .from('perfiles')
+    .select('*')
+    .eq('rol', 'operador')
+    .order('nombre');
+
+  if (resAnonOps.error) {
+    console.log('   ❌ ERROR AL CONSULTAR:', resAnonOps.error.message, `(${resAnonOps.error.code})`);
+  } else {
+    console.log(`   ✅ CORRECTO: Se obtuvieron ${resAnonOps.data?.length || 0} operadores para botones rápidos:`);
+    resAnonOps.data?.forEach((op) => {
+      console.log(`      • ${op.nombre} (Legajo #${op.legajo})`);
+    });
+  }
+
+  // Test F: Anónimo intenta leer perfiles de supervisor
+  console.log('\n6. Probando SELECT en perfiles de SUPERVISOR como ANÓNIMO...');
+  const resAnonSup = await clientAnon
+    .from('perfiles')
+    .select('*')
+    .eq('rol', 'supervisor');
+
+  if (resAnonSup.error) {
+    console.log('   🔒 PROTEGIDO CON ERROR:', resAnonSup.error.message);
+  } else if (!resAnonSup.data || resAnonSup.data.length === 0) {
+    console.log('   🔒 PROTEGIDO: 0 supervisores expuestos a clientes anónimos.');
+  } else {
+    console.log(`   ⚠️ EXPUESTO: Se listaron ${resAnonSup.data.length} supervisores a usuarios anónimos!`);
+  }
+
+  // Test G: Anónimo intenta modificar equipos
+  console.log('\n7. Probando UPDATE en equipos como ANÓNIMO...');
+  const resAnonUpdateEq = await clientAnon
+    .from('equipos')
+    .update({ marca: 'Hacked' })
+    .eq('interno', '01')
+    .select();
+
+  if (resAnonUpdateEq.error) {
+    console.log('   🔒 BLOQUEADO POR RLS CON ERROR:', resAnonUpdateEq.error.message);
+  } else if (!resAnonUpdateEq.data || resAnonUpdateEq.data.length === 0) {
+    console.log('   🔒 BLOQUEADO POR RLS: 0 filas modificadas.');
+  } else {
+    console.log('   ⚠️ VULNERABLE: Cliente anónimo pudo modificar equipos!');
+  }
+
+  // Test H: Anónimo intenta insertar inspección
+  console.log('\n8. Probando INSERT en inspecciones como ANÓNIMO...');
+  const resAnonInsp = await clientAnon
+    .from('inspecciones')
+    .insert({ equipo_id: '00000000-0000-0000-0000-000000000000' })
+    .select();
+
+  if (resAnonInsp.error) {
+    console.log('   🔒 BLOQUEADO POR RLS:', resAnonInsp.error.message);
+  } else {
+    console.log('   ⚠️ VULNERABLE: Cliente anónimo pudo crear inspección!');
+  }
+
+  // Test I: Anónimo intenta insertar falla
+  console.log('\n9. Probando INSERT en fallas como ANÓNIMO...');
+  const resAnonFalla = await clientAnon
+    .from('fallas')
+    .insert({ descripcion: 'Test anon intruso' })
+    .select();
+
+  if (resAnonFalla.error) {
+    console.log('   🔒 BLOQUEADO POR RLS:', resAnonFalla.error.message);
+  } else {
+    console.log('   ⚠️ VULNERABLE: Cliente anónimo pudo crear falla!');
+  }
+
+  console.log('\n================================================================\n');
 }
 
 runAudit();
+

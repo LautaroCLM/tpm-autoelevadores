@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import QRCode from 'qrcode';
 import {
   fetchEquipos,
   fetchInspecciones,
@@ -48,6 +49,55 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
+
+interface OperatorCardData {
+  nombre: string;
+  legajo: string;
+  codigoQR: string;
+  rol: string;
+}
+
+function OperatorQRCard({ op }: { op: OperatorCardData }) {
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    QRCode.toDataURL(op.codigoQR, {
+      width: 200,
+      margin: 1,
+      color: { dark: '#000000', light: '#ffffff' },
+    })
+      .then((url) => setQrDataUrl(url))
+      .catch((err) => console.error('Error generando QR de credencial:', err));
+  }, [op.codigoQR]);
+
+  return (
+    <div className="bg-[#0B0F17] border border-slate-800/90 rounded-xl p-4 flex items-center justify-between gap-4">
+      <div className="space-y-1">
+        <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">
+          Legajo #{op.legajo}
+        </span>
+        <h3 className="font-bold text-base text-white">{op.nombre}</h3>
+        <p className="text-xs text-slate-400 font-mono">{op.rol}</p>
+        <div className="text-[10px] font-mono text-slate-500 bg-slate-900/90 px-2 py-1 rounded border border-slate-800 mt-2 truncate max-w-[200px]">
+          {op.codigoQR}
+        </div>
+      </div>
+
+      <div className="w-20 h-20 bg-white p-1 rounded-xl flex items-center justify-center shrink-0 shadow-md">
+        {qrDataUrl ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            src={qrDataUrl}
+            alt={`QR Credencial ${op.nombre}`}
+            className="w-full h-full object-contain select-none"
+          />
+        ) : (
+          <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function SupervisorDashboardPage() {
   const router = useRouter();
@@ -734,54 +784,29 @@ export default function SupervisorDashboardPage() {
                 {
                   nombre: 'Juan Pérez',
                   legajo: '4029',
-                  codigoQR: 'TPM:OP:4029:[REDACTADO_TOKEN_OP_4029]',
+                  codigoQR: 'TPM:OP:4029',
                   rol: 'Operador Turno Mañana',
                 },
                 {
                   nombre: 'Carlos Gómez',
                   legajo: '5118',
-                  codigoQR: 'TPM:OP:5118:[REDACTADO_TOKEN_OP_5118]',
+                  codigoQR: 'TPM:OP:5118',
                   rol: 'Operador Turno Tarde',
                 },
                 {
                   nombre: 'Lucas Martínez',
                   legajo: '2045',
-                  codigoQR: 'TPM:OP:2045:[REDACTADO_TOKEN_OP_2045]',
+                  codigoQR: 'TPM:OP:2045',
                   rol: 'Operador Turno Rotativo',
                 },
                 {
                   nombre: 'Martín Rodríguez',
                   legajo: '3082',
-                  codigoQR: 'TPM:OP:3082:[REDACTADO_TOKEN_OP_3082]',
+                  codigoQR: 'TPM:OP:3082',
                   rol: 'Operador Turno Noche',
                 },
               ].map((op) => (
-                <div
-                  key={op.legajo}
-                  className="bg-[#0B0F17] border border-slate-800/90 rounded-xl p-4 flex items-center justify-between gap-4"
-                >
-                  <div className="space-y-1">
-                    <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">
-                      Legajo #{op.legajo}
-                    </span>
-                    <h3 className="font-bold text-base text-white">{op.nombre}</h3>
-                    <p className="text-xs text-slate-400 font-mono">{op.rol}</p>
-                    <div className="text-[10px] font-mono text-slate-500 bg-slate-900/90 px-2 py-1 rounded border border-slate-800 mt-2 truncate max-w-[200px]">
-                      {op.codigoQR}
-                    </div>
-                  </div>
-
-                  <div className="w-20 h-20 bg-white p-1 rounded-xl flex items-center justify-center shrink-0 shadow-md">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`https://qr.local.placeholder/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                        op.codigoQR
-                      )}`}
-                      alt="QR Credencial"
-                      className="w-full h-full"
-                    />
-                  </div>
-                </div>
+                <OperatorQRCard key={op.legajo} op={op} />
               ))}
             </div>
           </div>

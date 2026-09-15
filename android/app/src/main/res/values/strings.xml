@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TPM Autoelevadores</string>
+    <string name="title_activity_main">TPM Autoelevadores</string>
+    <string name="package_name">com.tpmautoelevadores.app</string>
+    <string name="custom_url_scheme">com.tpmautoelevadores.app</string>
+</resources>

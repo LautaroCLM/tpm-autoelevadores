@@ -4,12 +4,18 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { fetchEquipos } from '../lib/api/tpm';
-import { getCurrentSessionAndProfile, signInOperatorWithQR, signOutUser } from '../lib/api/auth';
+import {
+  getCurrentSessionAndProfile,
+  signInOperatorWithQR,
+  fetchOperadores,
+  signOutUser,
+} from '../lib/api/auth';
 import { Equipo, Perfil } from '../lib/types/tpm';
 import { StatusBadge } from '../components/StatusBadge';
 import { MantenimientoBadge } from '../components/MantenimientoBadge';
 import { QRScannerModal } from '../components/QRScannerModal';
 import { EquipoQRModal } from '../components/EquipoQRModal';
+import { ComoUsarSection } from '../components/ComoUsarSection';
 import { extractEquipoCode } from '../lib/utils/auth-helpers';
 import {
   QrCode,
@@ -24,16 +30,20 @@ import {
   LogOut,
   Sparkles,
   CheckCircle2,
+  Users,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function HomePage() {
   const router = useRouter();
   const [equipos, setEquipos] = useState<Equipo[]>([]);
+  const [operadores, setOperadores] = useState<Perfil[]>([]);
   const [loading, setLoading] = useState(true);
   const [manualInput, setManualInput] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [operatorScannerOpen, setOperatorScannerOpen] = useState(false);
   const [selectedQrEquipo, setSelectedQrEquipo] = useState<Equipo | null>(null);
+  const [loggingInLegajo, setLoggingInLegajo] = useState<string | null>(null);
 
   // Estado del usuario activo
   const [perfil, setPerfil] = useState<Perfil | null>(null);
@@ -41,12 +51,14 @@ export default function HomePage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [eqs, authInfo] = await Promise.all([
+      const [eqs, authInfo, ops] = await Promise.all([
         fetchEquipos(),
         getCurrentSessionAndProfile(),
+        fetchOperadores(),
       ]);
       setEquipos(eqs);
       setPerfil(authInfo.perfil);
+      setOperadores(ops);
     } catch (err) {
       console.error('Error loading initial data:', err);
     } finally {
@@ -93,8 +105,79 @@ export default function HomePage() {
     toast.info('Sesión cerrada correctamente');
   };
 
-  const handleScanResult = (code: string) => {
+  // Login rápido de operador por selección directa
+  const handleOperatorQuickLogin = async (op: Perfil) => {
+    if (!op.legajo) {
+      toast.warning(`El operador ${op.nombre} no tiene número de legajo configurado`);
+      return;
+    }
+
+    setLoggingInLegajo(op.legajo);
+    try {
+      const res = await signInOperatorWithQR(`TPM:OP:${op.legajo}`);
+      if (res.success && res.perfil) {
+        setPerfil(res.perfil);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+        }
+        toast.success(`Operador Activo: ${res.perfil.nombre}`);
+
+        // Transición automática suave al paso de escanear o seleccionar autoelevador
+        setTimeout(() => {
+          const fleetSection = document.getElementById('seccion-autoelevadores');
+          if (fleetSection) {
+            fleetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 150);
+      } else {
+        toast.error(res.error || 'No se pudo autenticar al operador');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al iniciar sesión de operador');
+    } finally {
+      setLoggingInLegajo(null);
+    }
+  };
+
+  const handleScanResult = async (code: string) => {
     setScannerOpen(false);
+    setOperatorScannerOpen(false);
+
+    const clean = code.trim();
+    // Si el QR escaneado es una credencial de operador física (ej: "TPM:OP:4029" o similar)
+    if (
+      clean.toUpperCase().startsWith('TPM:OP:') ||
+      clean.toUpperCase().startsWith('TPM-OP:') ||
+      clean.startsWith('{')
+    ) {
+      toast.loading('Autenticando credencial de operador...');
+      try {
+        const res = await signInOperatorWithQR(clean);
+        toast.dismiss();
+        if (res.success && res.perfil) {
+          setPerfil(res.perfil);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+          }
+          toast.success(`Operador Activo: ${res.perfil.nombre}`);
+
+          setTimeout(() => {
+            const fleetSection = document.getElementById('seccion-autoelevadores');
+            if (fleetSection) {
+              fleetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+          }, 150);
+        } else {
+          toast.error(res.error || 'Credencial de operador no válida');
+        }
+      } catch (err: any) {
+        toast.dismiss();
+        toast.error(err?.message || 'Error al procesar credencial de operador');
+      }
+      return;
+    }
+
+    // De lo contrario, se trata de un código de máquina / autoelevador
     handleSelectEquipo(code);
   };
 
@@ -242,8 +325,109 @@ export default function HomePage() {
         </form>
       </div>
 
+      {/* Botones de Acceso Rápido por Operador Real */}
+      <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="space-y-0.5">
+            <div className="flex items-center gap-2">
+              <Users size={16} className="text-amber-400" />
+              <h2 className="text-sm sm:text-base font-black text-white">
+                Operadores de Planta — Acceso Rápido
+              </h2>
+            </div>
+            <p className="text-xs text-slate-400">
+              Tocá tu nombre para identificarte en el turno sin credencial física:
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setOperatorScannerOpen(true)}
+            className="self-start sm:self-auto text-xs font-bold text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60 bg-amber-500/10 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer btn-tactile"
+          >
+            <Camera size={13} />
+            <span>Escanear Credencial Física</span>
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-16 bg-slate-950/60 rounded-xl animate-pulse border border-slate-800" />
+            ))}
+          </div>
+        ) : operadores.length === 0 ? (
+          <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 text-center">
+            <p className="text-xs text-slate-400">No se encontraron operadores registrados en la base de datos.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+            {operadores.map((op) => {
+              const isActive = perfil?.id === op.id;
+              const isLoggingIn = loggingInLegajo === op.legajo;
+
+              return (
+                <button
+                  key={op.id}
+                  type="button"
+                  onClick={() => handleOperatorQuickLogin(op)}
+                  disabled={isLoggingIn}
+                  title={`Identificarse como ${op.nombre} (Legajo #${op.legajo})`}
+                  className={`p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer btn-tactile ${
+                    isActive
+                      ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/40 shadow-xs'
+                      : 'bg-slate-950/80 hover:bg-slate-900 border-slate-800 hover:border-amber-500/50'
+                  } ${isLoggingIn ? 'opacity-80' : ''}`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`w-9 h-9 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
+                        isActive
+                          ? 'bg-emerald-500 text-slate-950 shadow-xs'
+                          : 'bg-slate-850 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {isLoggingIn ? (
+                        <RefreshCw size={14} className="animate-spin text-amber-400" />
+                      ) : (
+                        op.nombre
+                          .split(' ')
+                          .filter(Boolean)
+                          .map((n) => n[0])
+                          .join('')
+                          .slice(0, 2)
+                          .toUpperCase()
+                      )}
+                    </div>
+                    <div className="truncate">
+                      <p className="text-xs sm:text-sm font-bold text-white truncate">
+                        {op.nombre}
+                      </p>
+                      <p className="text-[11px] font-mono text-slate-400">
+                        Legajo {op.legajo ? `#${op.legajo}` : 'S/N'}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isActive ? (
+                    <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                      <CheckCircle2 size={10} />
+                      <span>Activo</span>
+                    </span>
+                  ) : (
+                    <span className="shrink-0 text-[11px] font-bold text-slate-500 group-hover:text-amber-400">
+                      Entrar →
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Equipment Fleet List */}
-      <div className="space-y-3">
+      <div id="seccion-autoelevadores" className="space-y-3 scroll-mt-6">
         <div className="flex items-center justify-between">
           <h2 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
             <span>Autoelevadores en Planta</span>
@@ -337,11 +521,22 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* QR Camera Modal */}
+      {/* Sección Informativa y Tutorial Paso a Paso */}
+      <ComoUsarSection />
+
+      {/* QR Camera Modal Principal (Autoelevadores o Credenciales) */}
       <QRScannerModal
         isOpen={scannerOpen}
         mode="equipo"
         onClose={() => setScannerOpen(false)}
+        onScanSuccess={handleScanResult}
+      />
+
+      {/* QR Camera Modal Dedicado a Credenciales de Operador */}
+      <QRScannerModal
+        isOpen={operatorScannerOpen}
+        mode="operador"
+        onClose={() => setOperatorScannerOpen(false)}
         onScanSuccess={handleScanResult}
       />
 

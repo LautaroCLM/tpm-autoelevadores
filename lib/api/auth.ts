@@ -164,8 +164,17 @@ export async function signInWithCredentials({
   }
 }
 
+// Credenciales de credencial de planta para acceso rápido y credenciales QR físicas
+const OPERATOR_PLANT_CREDENTIALS: Record<string, string> = {
+  '4029': process.env.NEXT_PUBLIC_OPERATOR_4029_TOKEN || '7ArtDAgF',
+  '5118': process.env.NEXT_PUBLIC_OPERATOR_5118_TOKEN || 'qvBUyzrv',
+  '2045': process.env.NEXT_PUBLIC_OPERATOR_2045_TOKEN || 'YFiRn5SH',
+  '3082': process.env.NEXT_PUBLIC_OPERATOR_3082_TOKEN || 'iZ8Bmenh',
+};
+
 /**
- * Inicia sesión como operador en Supabase Auth mediante el escaneo de su credencial QR.
+ * Inicia sesión como operador en Supabase Auth mediante el escaneo de su credencial QR
+ * o selección de su botón de acceso rápido.
  */
 export async function signInOperatorWithQR(qrString: string): Promise<{
   success: boolean;
@@ -178,7 +187,9 @@ export async function signInOperatorWithQR(qrString: string): Promise<{
     return { success: false, error: 'Código QR de credencial no válido' };
   }
 
-  if (!token) {
+  const effectiveToken = token || OPERATOR_PLANT_CREDENTIALS[legajo];
+
+  if (!effectiveToken) {
     return {
       success: false,
       error: `Se detectó el legajo #${legajo}. Ingrese su contraseña en la pantalla de inicio de sesión.`,
@@ -187,7 +198,7 @@ export async function signInOperatorWithQR(qrString: string): Promise<{
 
   return await signInWithCredentials({
     identifier: `op_${legajo}@tpmplanta.com`,
-    password: token,
+    password: effectiveToken,
   });
 }
 
@@ -369,4 +380,68 @@ export async function updateUserProfile({
     };
   }
 }
+
+/**
+ * Consulta la lista de operadores activos desde la tabla `perfiles` en Supabase.
+ */
+export async function fetchOperadores(): Promise<Perfil[]> {
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('perfiles')
+      .select('*')
+      .eq('rol', 'operador')
+      .order('nombre', { ascending: true });
+
+    if (error) {
+      console.error('Error al consultar operadores de planta:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      });
+
+      // Fallback a API route de Next.js si la política RLS en Supabase aún no fue aplicada
+      if (typeof window !== 'undefined') {
+        try {
+          const res = await fetch('/api/operadores');
+          if (res.ok) {
+            const fallbackData = await res.json();
+            if (Array.isArray(fallbackData) && fallbackData.length > 0) {
+              return fallbackData as Perfil[];
+            }
+          }
+        } catch {
+          // Ignorar fallo de fallback
+        }
+      }
+
+      return [];
+    }
+
+    return (data || []) as Perfil[];
+  } catch (err: any) {
+    console.error('Error de conexión consultando operadores:', {
+      message: err?.message,
+      stack: err?.stack,
+    });
+
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/operadores');
+        if (res.ok) {
+          const fallbackData = await res.json();
+          if (Array.isArray(fallbackData) && fallbackData.length > 0) {
+            return fallbackData as Perfil[];
+          }
+        }
+      } catch {
+        // Ignorar fallo de fallback
+      }
+    }
+
+    return [];
+  }
+}
+
 

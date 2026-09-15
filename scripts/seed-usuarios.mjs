@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -53,49 +54,64 @@ const supabase = createClient(supabaseUrl, serviceRoleKey, {
   },
 });
 
-// 3. Lista de usuarios de planta a crear / sincronizar
-const USERS_TO_SEED = [
+function resolveUserPassword(user) {
+  // 1. Clave específica por legajo o rol desde variables de entorno
+  const envKeyLegajo = user.legajo ? `SEED_PASSWORD_${user.legajo}` : null;
+  const envKeyRol = `SEED_PASSWORD_${user.rol.toUpperCase()}`;
+
+  if (envKeyLegajo && (process.env[envKeyLegajo] || envVars[envKeyLegajo])) {
+    return (process.env[envKeyLegajo] || envVars[envKeyLegajo]).trim();
+  }
+  if (process.env[envKeyRol] || envVars[envKeyRol]) {
+    return (process.env[envKeyRol] || envVars[envKeyRol]).trim();
+  }
+  if (process.env.DEFAULT_SEED_PASSWORD || envVars.DEFAULT_SEED_PASSWORD) {
+    return (process.env.DEFAULT_SEED_PASSWORD || envVars.DEFAULT_SEED_PASSWORD).trim();
+  }
+
+  // 2. Generación aleatoria criptográfica segura (sin claves fijas en repositorio)
+  return 'TmpSec_' + crypto.randomBytes(12).toString('hex') + '!';
+}
+
+// 3. Lista de usuarios de planta a crear / sincronizar (sin contraseñas fijas)
+const RAW_USERS = [
   {
     email: 'op_4029@tpmplanta.com',
-    password: '[REDACTADO_TOKEN_OP_4029]',
     nombre: 'Juan Pérez',
     legajo: '4029',
     rol: 'operador',
-    qrPayload: 'TPM:OP:4029:[REDACTADO_TOKEN_OP_4029]',
   },
   {
     email: 'op_5118@tpmplanta.com',
-    password: '[REDACTADO_TOKEN_OP_5118]',
     nombre: 'Carlos Gómez',
     legajo: '5118',
     rol: 'operador',
-    qrPayload: 'TPM:OP:5118:[REDACTADO_TOKEN_OP_5118]',
   },
   {
     email: 'op_2045@tpmplanta.com',
-    password: '[REDACTADO_TOKEN_OP_2045]',
     nombre: 'Lucas Martínez',
     legajo: '2045',
     rol: 'operador',
-    qrPayload: 'TPM:OP:2045:[REDACTADO_TOKEN_OP_2045]',
   },
   {
     email: 'op_3082@tpmplanta.com',
-    password: '[REDACTADO_TOKEN_OP_3082]',
     nombre: 'Martín Rodríguez',
     legajo: '3082',
     rol: 'operador',
-    qrPayload: 'TPM:OP:3082:[REDACTADO_TOKEN_OP_3082]',
   },
   {
     email: 'supervisor@tpm.com',
-    password: '[REDACTADO_PASS_SUPERVISOR]',
     nombre: 'Ing. Marcos Rivas',
     legajo: 'SUP-01',
     rol: 'supervisor',
-    qrPayload: null,
   },
 ];
+
+const USERS_TO_SEED = RAW_USERS.map((u) => ({
+  ...u,
+  password: resolveUserPassword(u),
+  qrPayload: u.legajo ? `TPM:OP:${u.legajo}` : null,
+}));
 
 async function seedUsers() {
   console.log(`📡 Conectando a Supabase Admin: ${supabaseUrl}`);
@@ -181,16 +197,17 @@ async function seedUsers() {
   console.log('🎉 PROCESO COMPLETADO — CREDENCIALES GENERADAS EXITOSAMENTE');
   console.log('================================================================\n');
 
-  console.log('📌 CREDENCIALES PARA PROBAR EN LA APP:\n');
+  console.log('📌 USUARIOS SINCRONIZADOS EN SUPABASE:\n');
   USERS_TO_SEED.forEach((u) => {
     console.log(`• ${u.nombre} (${u.rol.toUpperCase()}):`);
     console.log(`  - Email: ${u.email}`);
-    console.log(`  - Clave / Token: ${u.password}`);
+    console.log(`  - Legajo: ${u.legajo || 'N/A'}`);
     if (u.qrPayload) {
-      console.log(`  - String para QR: ${u.qrPayload}`);
+      console.log(`  - Identificador QR: ${u.qrPayload}`);
     } else {
       console.log(`  - Acceso: Formulario Login Supervisor (/login)`);
     }
+    console.log(`  - Clave: [Configurada mediante variable de entorno o generada de forma segura]`);
     console.log('');
   });
 }

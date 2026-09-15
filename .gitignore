@@ -11,3 +11,5 @@ tsconfig.tsbuildinfo
 *.tsbuildinfo
 .vercel
 .env*
+.credenciales-rotadas.txt
+.credenciales*
