@@ -20,6 +20,14 @@ import {
   updateMockFallaEstado,
 } from '../data/mock-db';
 import { enqueueInspeccion } from '../offline/queue';
+import {
+  saveEquiposCache,
+  getCachedEquipos,
+  getCachedEquipoByQR,
+  getCachedEquipoById,
+  saveActiveTemplateCache,
+  getCachedActiveTemplate,
+} from '../offline/plant-cache';
 import { extractEquipoCode } from '../utils/auth-helpers';
 
 function isSupabaseConfigured(): boolean {
@@ -29,103 +37,232 @@ function isSupabaseConfigured(): boolean {
 }
 
 export async function fetchEquipos(): Promise<Equipo[]> {
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+  if (isOffline) {
+    const cached = await getCachedEquipos();
+    if (cached && cached.length > 0) {
+      return cached;
+    }
+    throw new Error(
+      'No hay datos de autoelevadores guardados en este dispositivo. Abra la aplicación con conexión para descargar los datos de planta.'
+    );
+  }
+
   if (!isSupabaseConfigured()) {
-    return await getMockEquipos();
+    const mock = await getMockEquipos();
+    saveEquiposCache(mock).catch(() => {});
+    return mock;
   }
 
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('equipos')
-    .select('*')
-    .order('interno', { ascending: true });
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('equipos')
+      .select('*')
+      .order('interno', { ascending: true });
 
-  if (error) {
-    console.error('Error fetching equipos from Supabase:', error);
-    throw new Error(`Error al consultar equipos: ${error.message}`);
+    if (error) {
+      if (isNetworkError(error)) {
+        const cached = await getCachedEquipos();
+        if (cached && cached.length > 0) {
+          return cached;
+        }
+      }
+      console.error('Error fetching equipos from Supabase:', error);
+      throw new Error(`Error al consultar equipos: ${error.message}`);
+    }
+
+    const equipos = (data || []) as Equipo[];
+    if (equipos.length > 0) {
+      saveEquiposCache(equipos).catch((e) =>
+        console.warn('No se pudo guardar la caché de equipos:', e)
+      );
+    }
+    return equipos;
+  } catch (err: any) {
+    if (isNetworkError(err)) {
+      const cached = await getCachedEquipos();
+      if (cached && cached.length > 0) {
+        return cached;
+      }
+      throw new Error(
+        'Sin conexión y no hay datos de autoelevadores guardados en este dispositivo. Conéctese a internet para descargar la flota.'
+      );
+    }
+    throw err;
   }
-
-  return (data || []) as Equipo[];
 }
 
 export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> {
   const cleanCode = extractEquipoCode(qrCodigo);
   if (!cleanCode) return null;
 
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+  if (isOffline) {
+    const cached = await getCachedEquipoByQR(cleanCode);
+    if (cached) return cached;
+    throw new Error(
+      `El autoelevador #${cleanCode} no se encuentra en la memoria local del dispositivo. Conéctese a internet para sincronizar la flota.`
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return await getMockEquipoByQR(cleanCode);
   }
 
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('equipos')
-    .select('*')
-    .or(`qr_codigo.ilike.${cleanCode},interno.eq.${cleanCode}`)
-    .maybeSingle();
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('equipos')
+      .select('*')
+      .or(`qr_codigo.ilike.${cleanCode},interno.eq.${cleanCode}`)
+      .maybeSingle();
 
-  if (error) {
-    console.error('Error fetching equipo by QR from Supabase:', error);
-    throw new Error(`Error al buscar equipo por QR: ${error.message}`);
+    if (error) {
+      if (isNetworkError(error)) {
+        const cached = await getCachedEquipoByQR(cleanCode);
+        if (cached) return cached;
+      }
+      console.error('Error fetching equipo by QR from Supabase:', error);
+      throw new Error(`Error al buscar equipo por QR: ${error.message}`);
+    }
+
+    return (data || null) as Equipo | null;
+  } catch (err: any) {
+    if (isNetworkError(err)) {
+      const cached = await getCachedEquipoByQR(cleanCode);
+      if (cached) return cached;
+      throw new Error(
+        `Sin conexión y el autoelevador #${cleanCode} no se encuentra en la memoria local. Conéctese a internet.`
+      );
+    }
+    throw err;
   }
-
-  return (data || null) as Equipo | null;
 }
 
 export async function fetchEquipoById(id: string): Promise<Equipo | null> {
+  if (!id) return null;
+
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+  if (isOffline) {
+    const cached = await getCachedEquipoById(id);
+    if (cached) return cached;
+    throw new Error(
+      'El autoelevador no se encuentra en la memoria local del dispositivo. Conéctese a internet.'
+    );
+  }
+
   if (!isSupabaseConfigured()) {
     return await getMockEquipoById(id);
   }
 
-  const supabase = createClient();
-  const { data, error } = await supabase
-    .from('equipos')
-    .select('*')
-    .eq('id', id)
-    .maybeSingle();
+  try {
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from('equipos')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
 
-  if (error) {
-    console.error('Error fetching equipo by ID from Supabase:', error);
-    throw new Error(`Error al buscar equipo por ID: ${error.message}`);
+    if (error) {
+      if (isNetworkError(error)) {
+        const cached = await getCachedEquipoById(id);
+        if (cached) return cached;
+      }
+      console.error('Error fetching equipo by ID from Supabase:', error);
+      throw new Error(`Error al buscar equipo por ID: ${error.message}`);
+    }
+
+    return (data || null) as Equipo | null;
+  } catch (err: any) {
+    if (isNetworkError(err)) {
+      const cached = await getCachedEquipoById(id);
+      if (cached) return cached;
+      throw new Error('Sin conexión y el autoelevador no se encuentra en la memoria local.');
+    }
+    throw err;
   }
-
-  return (data || null) as Equipo | null;
 }
 
 export async function fetchActiveChecklistTemplate(): Promise<{
   template: ChecklistTemplate;
   items: ChecklistItem[];
 }> {
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+  if (isOffline) {
+    const cached = await getCachedActiveTemplate();
+    if (cached) {
+      return cached;
+    }
+    throw new Error(
+      'La plantilla de checklist no ha sido descargada en este dispositivo. Conéctese a internet para sincronizar la plantilla.'
+    );
+  }
+
   if (!isSupabaseConfigured()) {
-    return await getMockTemplateAndItems();
+    const mock = await getMockTemplateAndItems();
+    saveActiveTemplateCache(mock.template, mock.items).catch(() => {});
+    return mock;
   }
 
-  const supabase = createClient();
-  const { data: template, error: tmplErr } = await supabase
-    .from('checklist_templates')
-    .select('*')
-    .eq('activo', true)
-    .limit(1)
-    .maybeSingle();
+  try {
+    const supabase = createClient();
+    const { data: template, error: tmplErr } = await supabase
+      .from('checklist_templates')
+      .select('*')
+      .eq('activo', true)
+      .limit(1)
+      .maybeSingle();
 
-  if (tmplErr || !template) {
-    console.error('Error fetching checklist template from Supabase:', tmplErr);
-    throw new Error(`Error al cargar plantilla TPM: ${tmplErr?.message || 'No se encontró plantilla activa'}`);
+    if (tmplErr || !template) {
+      if (isNetworkError(tmplErr)) {
+        const cached = await getCachedActiveTemplate();
+        if (cached) return cached;
+      }
+      console.error('Error fetching checklist template from Supabase:', tmplErr);
+      throw new Error(`Error al cargar plantilla TPM: ${tmplErr?.message || 'No se encontró plantilla activa'}`);
+    }
+
+    const { data: items, error: itemsErr } = await supabase
+      .from('checklist_items')
+      .select('*')
+      .eq('template_id', (template as ChecklistTemplate).id)
+      .order('orden', { ascending: true });
+
+    if (itemsErr || !items || items.length === 0) {
+      if (isNetworkError(itemsErr)) {
+        const cached = await getCachedActiveTemplate();
+        if (cached) return cached;
+      }
+      console.error('Error fetching checklist items from Supabase:', itemsErr);
+      throw new Error(`Error al cargar ítems del checklist: ${itemsErr?.message || 'Plantilla sin ítems'}`);
+    }
+
+    const result = {
+      template: template as ChecklistTemplate,
+      items: items as ChecklistItem[],
+    };
+
+    // Guardar en la caché local de IndexedDB
+    saveActiveTemplateCache(result.template, result.items).catch((e) =>
+      console.warn('No se pudo guardar la caché de la plantilla activa:', e)
+    );
+
+    return result;
+  } catch (err: any) {
+    if (isNetworkError(err)) {
+      const cached = await getCachedActiveTemplate();
+      if (cached) return cached;
+      throw new Error(
+        'Sin conexión y la plantilla de checklist no ha sido descargada en este dispositivo. Conéctese a internet.'
+      );
+    }
+    throw err;
   }
-
-  const { data: items, error: itemsErr } = await supabase
-    .from('checklist_items')
-    .select('*')
-    .eq('template_id', (template as ChecklistTemplate).id)
-    .order('orden', { ascending: true });
-
-  if (itemsErr || !items || items.length === 0) {
-    console.error('Error fetching checklist items from Supabase:', itemsErr);
-    throw new Error(`Error al cargar ítems del checklist: ${itemsErr?.message || 'Plantilla sin ítems'}`);
-  }
-
-  return {
-    template: template as ChecklistTemplate,
-    items: items as ChecklistItem[],
-  };
 }
 /**
  * Determina de forma precisa si un error se debe a falta de conectividad/red

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Truck, QrCode, LayoutDashboard, LogOut, User, ShieldCheck } from 'lucide-react';
 import { getCurrentSessionAndProfile, signOutUser } from '../lib/api/auth';
 import { Perfil } from '../lib/types/tpm';
@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 
 export const Header: React.FC = () => {
   const pathname = usePathname();
+  const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil | null>(null);
 
   useEffect(() => {
@@ -22,7 +23,7 @@ export const Header: React.FC = () => {
     const handleAuthChange = () => loadAuth();
     window.addEventListener('tpm_auth_changed', handleAuthChange);
     return () => window.removeEventListener('tpm_auth_changed', handleAuthChange);
-  }, [pathname]);
+  }, []);
 
   const handleSignOut = async () => {
     await signOutUser();
@@ -30,8 +31,9 @@ export const Header: React.FC = () => {
     toast.info('Sesión cerrada');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-      window.location.href = '/';
     }
+    router.replace('/');
+    router.refresh();
   };
 
   const isSupervisorOrMaint = perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento';
@@ -40,25 +42,25 @@ export const Header: React.FC = () => {
     <header className="bg-[#0e1420]/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 px-3 sm:px-4 py-2.5 sticky top-0 z-40">
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand / Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors shadow-xs">
-            <Truck size={19} />
+        <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
+          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors shadow-xs">
+            <Truck size={17} className="sm:w-[19px] sm:h-[19px]" />
           </div>
           <div className="leading-tight">
-            <div className="font-black text-sm sm:text-base tracking-tight text-white flex items-center gap-1">
+            <div className="font-black text-xs sm:text-base tracking-tight text-white flex items-center gap-1">
               TPM <span className="text-amber-400">ELEVADORES</span>
             </div>
-            <div className="text-[9px] sm:text-[10px] text-slate-400 font-mono tracking-wider uppercase">
+            <div className="text-[8px] sm:text-[10px] text-slate-400 font-mono tracking-wider uppercase">
               Checklist Planta • Nivel 1
             </div>
           </div>
         </Link>
 
         {/* Navigation & Session Controls */}
-        <nav className="flex items-center gap-1.5 sm:gap-2">
+        <nav className="flex items-center gap-1 sm:gap-2 shrink-0">
           <Link
             href="/"
-            className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 btn-tactile border ${
+            className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 btn-tactile border ${
               pathname === '/'
                 ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
                 : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
@@ -72,14 +74,14 @@ export const Header: React.FC = () => {
             <Link
               href="/dashboard"
               prefetch={false}
-              className={`min-h-[38px] px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 btn-tactile border ${
+              className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 btn-tactile border ${
                 pathname.startsWith('/dashboard')
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
                   : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
               }`}
             >
               <LayoutDashboard size={14} className={pathname.startsWith('/dashboard') ? 'text-slate-950' : 'text-slate-400'} />
-              <span>Supervisor</span>
+              <span className="hidden min-[420px]:inline">Supervisor</span>
             </Link>
           )}
 
@@ -87,7 +89,7 @@ export const Header: React.FC = () => {
           {perfil && (
             <Link
               href="/perfil"
-              className={`min-h-[38px] px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 btn-tactile border ${
+              className={`min-h-[38px] px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 btn-tactile border ${
                 pathname === '/perfil'
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-xs'
                   : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 hover:text-white'
@@ -101,7 +103,7 @@ export const Header: React.FC = () => {
 
           {/* Active Session Status */}
           {perfil ? (
-            <div className="flex items-center gap-1.5 pl-1.5 sm:pl-2 border-l border-slate-800">
+            <div className="flex items-center gap-1 sm:gap-1.5 pl-1 sm:pl-2 border-l border-slate-800">
               <Link
                 href="/perfil"
                 className="hidden md:flex flex-col text-right leading-tight hover:opacity-80 transition cursor-pointer"

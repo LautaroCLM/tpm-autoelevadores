@@ -18,7 +18,12 @@ import { Equipo, Inspeccion, Falla, Perfil } from '../../lib/types/tpm';
 import { StatusBadge } from '../../components/StatusBadge';
 import { GravedadBadge } from '../../components/GravedadBadge';
 import { MantenimientoBadge } from '../../components/MantenimientoBadge';
-import { EquipoQRModal } from '../../components/EquipoQRModal';
+import dynamic from 'next/dynamic';
+
+const EquipoQRModal = dynamic(
+  () => import('../../components/EquipoQRModal').then((mod) => mod.EquipoQRModal),
+  { ssr: false }
+);
 import { formatDate } from '../../lib/utils';
 import { calcularEstadoMantenimiento } from '../../lib/utils/mantenimiento';
 import {
@@ -303,9 +308,9 @@ export default function SupervisorDashboardPage() {
   });
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-6 sm:py-8 w-full space-y-6">
+    <div className="max-w-6xl mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full space-y-6 animate-fade-in">
       {/* Header Panel */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#111724] border border-slate-800/90 rounded-2xl p-5 sm:p-6 shadow-xl shadow-black/40">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/40">
         <div>
           <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 text-xs font-mono font-bold uppercase tracking-wider mb-2 border border-amber-500/30">
             <ShieldCheck size={14} />
@@ -340,56 +345,56 @@ export default function SupervisorDashboardPage() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-        <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-4 shadow-md">
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Truck size={13} className="text-slate-500" /> Flota Total
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-4">
+        <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-3 sm:p-4 shadow-md card-hover">
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Truck size={13} className="text-slate-500 shrink-0" /> Flota Total
           </span>
           <div className="text-2xl font-mono font-tabular font-black text-white mt-1.5">{totalEquipos}</div>
-          <span className="text-[11px] font-mono text-slate-500">Unidades registradas</span>
+          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Unidades registradas</span>
         </div>
 
-        <div className="bg-[#111724] border border-emerald-500/30 bg-emerald-500/[0.03] rounded-2xl p-4 shadow-md">
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-            <CheckCircle2 size={13} /> Operativos
+        <div className="bg-[#111724] border border-emerald-500/30 bg-emerald-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+            <CheckCircle2 size={13} className="shrink-0" /> Operativos
           </span>
           <div className="text-2xl font-mono font-tabular font-black text-emerald-400 mt-1.5">{operativos}</div>
-          <span className="text-[11px] font-mono text-slate-500">Listos en línea</span>
+          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Listos en línea</span>
         </div>
 
-        <div className="bg-[#111724] border border-amber-500/30 bg-amber-500/[0.03] rounded-2xl p-4 shadow-md">
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-            <AlertTriangle size={13} /> Observados
+        <div className="bg-[#111724] border border-amber-500/30 bg-amber-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <AlertTriangle size={13} className="shrink-0" /> Observados
           </span>
           <div className="text-2xl font-mono font-tabular font-black text-amber-400 mt-1.5">{observados}</div>
-          <span className="text-[11px] font-mono text-slate-500">Fallas leves / medias</span>
+          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fallas leves / medias</span>
         </div>
 
-        <div className="bg-[#111724] border border-rose-500/40 bg-rose-500/[0.05] rounded-2xl p-4 shadow-md">
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
-            <ShieldAlert size={13} /> Parados
+        <div className="bg-[#111724] border border-rose-500/40 bg-rose-500/[0.05] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+            <ShieldAlert size={13} className="shrink-0" /> Parados
           </span>
           <div className="text-2xl font-mono font-tabular font-black text-rose-400 mt-1.5">{fueraServicio}</div>
-          <span className="text-[11px] font-mono text-slate-500">Fuera de servicio</span>
+          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fuera de servicio</span>
         </div>
 
-        <div className="bg-[#111724] border border-orange-500/30 bg-orange-500/[0.03] rounded-2xl p-4 shadow-md">
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
-            <AlertOctagon size={13} /> Fallas
+        <div className="bg-[#111724] border border-orange-500/30 bg-orange-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+            <AlertOctagon size={13} className="shrink-0" /> Fallas
           </span>
           <div className="text-2xl font-mono font-tabular font-black text-orange-400 mt-1.5">{fallasPendientes}</div>
-          <span className="text-[11px] font-mono text-slate-500">En reparación</span>
+          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">En reparación</span>
         </div>
 
-        <div className={`bg-[#111724] border rounded-2xl p-4 shadow-md ${
+        <div className={`bg-[#111724] border rounded-2xl p-3 sm:p-4 shadow-md card-hover ${
           mantenimientoVencidos > 0
             ? 'border-rose-500/40 bg-rose-500/5'
             : mantenimientoProximos > 0
             ? 'border-amber-500/40 bg-amber-500/5'
             : 'border-slate-800/90'
         }`}>
-          <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-            <Wrench size={13} /> Service hs
+          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+            <Wrench size={13} className="shrink-0" /> Service hs
           </span>
           <div className="flex items-baseline gap-1.5 mt-1.5">
             <span className={`text-2xl font-mono font-tabular font-black ${mantenimientoVencidos > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
@@ -402,14 +407,14 @@ export default function SupervisorDashboardPage() {
             </span>
             <span className="text-[10px] font-mono text-slate-400 font-semibold">próx.</span>
           </div>
-          <span className="text-[11px] font-mono text-slate-500 block mt-0.5">
+          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500 block mt-0.5">
             {mantenimientoAlDia} al día ({totalEquipos} tot.)
           </span>
         </div>
       </div>
 
       {/* Tabs Navigation */}
-      <div className="flex border-b border-slate-800 gap-2 sm:gap-4 overflow-x-auto">
+      <div className="flex border-b border-slate-800 gap-2 sm:gap-4 overflow-x-auto scrollbar-none -webkit-overflow-scrolling-touch">
         <button
           onClick={() => setActiveTab('flota')}
           className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
@@ -498,21 +503,21 @@ export default function SupervisorDashboardPage() {
               {equipos.map((eq) => (
                 <div
                   key={eq.id}
-                  className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/90 rounded-2xl p-5 shadow-lg shadow-black/40 space-y-4 transition"
+                  className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/90 rounded-2xl p-4 sm:p-5 shadow-lg shadow-black/40 space-y-4 transition card-hover"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-[#0B0F17] border border-slate-700/80 flex items-center justify-center text-amber-400 font-mono font-black text-xl shadow-inner">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-12 h-12 rounded-xl bg-[#0B0F17] border border-slate-700/80 flex items-center justify-center text-amber-400 font-mono font-black text-xl shadow-inner shrink-0">
                         {eq.interno}
                       </div>
-                      <div>
+                      <div className="min-w-0 truncate">
                         <div className="text-xs font-mono text-amber-400 font-semibold tracking-wider">
                           QR: {eq.qr_codigo}
                         </div>
-                        <h3 className="font-bold text-base text-white">
+                        <h3 className="font-bold text-base text-white truncate">
                           Interno #{eq.interno} — {eq.marca}
                         </h3>
-                        <p className="text-xs text-slate-400 font-mono">{eq.modelo}</p>
+                        <p className="text-xs text-slate-400 font-mono truncate">{eq.modelo}</p>
                       </div>
                     </div>
                     <StatusBadge estado={eq.estado} size="sm" />
@@ -593,7 +598,7 @@ export default function SupervisorDashboardPage() {
       {/* TAB 2: GESTIÓN DE FALLAS */}
       {activeTab === 'fallas' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             <span className="text-xs font-mono font-bold text-slate-400 flex items-center gap-1.5 mr-1">
               <Filter size={13} className="text-amber-500" /> Filtrar:
             </span>
@@ -1139,11 +1144,13 @@ export default function SupervisorDashboardPage() {
       )}
 
       {/* MODAL 4: VER / DESCARGAR / IMPRIMIR QR DE EQUIPO */}
-      <EquipoQRModal
-        isOpen={Boolean(printQrEquipo)}
-        onClose={() => setPrintQrEquipo(null)}
-        equipo={printQrEquipo}
-      />
+      {Boolean(printQrEquipo) && (
+        <EquipoQRModal
+          isOpen={Boolean(printQrEquipo)}
+          onClose={() => setPrintQrEquipo(null)}
+          equipo={printQrEquipo}
+        />
+      )}
 
       {/* Photo Modal Preview */}
       {selectedPhoto && (

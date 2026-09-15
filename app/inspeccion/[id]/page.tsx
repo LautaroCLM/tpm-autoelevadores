@@ -10,6 +10,7 @@ import {
   isNetworkError,
 } from '../../../lib/api/tpm';
 import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
+import { createClient } from '../../../lib/supabase/client';
 import {
   Equipo,
   ChecklistTemplate,
@@ -21,7 +22,12 @@ import {
 import { enqueueInspeccion } from '../../../lib/offline/queue';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { GravedadBadge } from '../../../components/GravedadBadge';
-import { FallaModal } from '../../../components/FallaModal';
+import dynamic from 'next/dynamic';
+
+const FallaModal = dynamic(
+  () => import('../../../components/FallaModal').then((mod) => mod.FallaModal),
+  { ssr: false }
+);
 import {
   ArrowLeft,
   Check,
@@ -79,18 +85,40 @@ export default function InspeccionChecklistPage() {
       if (!equipoId) return;
       setLoading(true);
       try {
-        // 1. Validar sesión activa del operario
-        const authInfo = await getCurrentSessionAndProfile();
-        if (!authInfo.user) {
+        // 1. Validar sesión activa del operario distinguiendo online u offline
+        let authUser = null;
+        let authPerfil = null;
+        const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+
+        if (isOffline) {
+          const supabase = createClient();
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            authUser = session.user;
+            authPerfil = {
+              id: session.user.id,
+              nombre: session.user.user_metadata?.nombre || 'Operador',
+              legajo: session.user.user_metadata?.legajo || null,
+              rol: session.user.user_metadata?.rol || 'operador',
+              created_at: session.user.created_at || new Date().toISOString(),
+            };
+          }
+        } else {
+          const authInfo = await getCurrentSessionAndProfile();
+          authUser = authInfo.user;
+          authPerfil = authInfo.perfil;
+        }
+
+        if (!authUser) {
           toast.error('Debe iniciar sesión para realizar la inspección');
           const currentUrl = window.location.pathname + window.location.search;
           router.replace(`/login?redirect=${encodeURIComponent(currentUrl)}`);
           return;
         }
 
-        if (authInfo.perfil) {
+        if (authPerfil) {
           setOperadorNombre(
-            authInfo.perfil.nombre + (authInfo.perfil.legajo ? ` (#${authInfo.perfil.legajo})` : '')
+            authPerfil.nombre + (authPerfil.legajo ? ` (#${authPerfil.legajo})` : '')
           );
         }
 
@@ -117,13 +145,22 @@ export default function InspeccionChecklistPage() {
           });
           setResponses(initialMap);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error loading checklist data:', err);
+        toast.error(err?.message || 'Error al cargar datos del checklist');
       } finally {
         setLoading(false);
       }
     }
     initData();
+
+    // Pre-calentar modal de fallas en caché en segundo plano cuando hay conexión
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      const timer = setTimeout(() => {
+        import('../../../components/FallaModal').catch(() => {});
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
   }, [equipoId, router]);
 
   // Agrupamiento de ítems por sección
@@ -275,16 +312,30 @@ export default function InspeccionChecklistPage() {
       return;
     }
 
-    // Obtener identidad real del operador desde la sesión activa de Supabase
-    const authInfo = await getCurrentSessionAndProfile();
-    if (!authInfo.user) {
-      toast.error('Sesión no válida o caducada. Por favor inicie sesión nuevamente.');
-      const currentUrl = window.location.pathname + window.location.search;
-      router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
-      return;
-    }
+    // Obtener identidad real del operador distinguiendo estado online u offline
+    let finalOperadorId = '';
+    const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
-    const finalOperadorId = authInfo.user.id;
+    if (isOffline) {
+      // Modo offline: validar sesión local persistida sin realizar llamadas de red a Supabase Auth
+      const supabase = createClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        toast.error('No se detectó una sesión activa en este dispositivo. Inicie sesión cuando disponga de conexión.');
+        return;
+      }
+      finalOperadorId = session.user.id;
+    } else {
+      // Modo online: validación completa con verificación en el servidor y política de sesión diaria
+      const authInfo = await getCurrentSessionAndProfile();
+      if (!authInfo.user) {
+        toast.error('Sesión no válida o caducada. Por favor inicie sesión nuevamente.');
+        const currentUrl = window.location.pathname + window.location.search;
+        router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
+        return;
+      }
+      finalOperadorId = authInfo.user.id;
+    }
 
     // Construir respuestas completas para TODOS los ítems de la plantilla activa
     const respuestasCompletas: ChecklistItemResponse[] = items.map((it) => {
@@ -317,8 +368,8 @@ export default function InspeccionChecklistPage() {
     setIsSubmitting(true);
 
     try {
-      // Si el navegador reporta explícitamente estar offline
-      if (typeof window !== 'undefined' && !navigator.onLine) {
+      // Si el navegador reporta explícitamente estar offline, encolar en IndexedDB y evitar RPC remoto
+      if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
         await enqueueInspeccion(payload);
         toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente al reconectar.');
         setCompletedResult({
@@ -484,7 +535,7 @@ export default function InspeccionChecklistPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full space-y-4 pb-32">
+    <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full space-y-4 pb-32 animate-fade-in">
       {/* Top Header info */}
       <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
         <button
@@ -742,7 +793,7 @@ export default function InspeccionChecklistPage() {
                     placeholder="Observaciones o notas adicionales del turno..."
                     value={resp?.valor_texto || ''}
                     onChange={(e) => handleTextChange(item.id, e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl p-3 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed"
+                    className="w-full bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl p-3 text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 leading-relaxed"
                   />
                 </div>
               )}

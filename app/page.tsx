@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { fetchEquipos } from '../lib/api/tpm';
+import { fetchEquipos, fetchActiveChecklistTemplate } from '../lib/api/tpm';
 import {
   getCurrentSessionAndProfile,
   signInOperatorWithQR,
@@ -13,9 +13,18 @@ import {
 import { Equipo, Perfil } from '../lib/types/tpm';
 import { StatusBadge } from '../components/StatusBadge';
 import { MantenimientoBadge } from '../components/MantenimientoBadge';
-import { QRScannerModal } from '../components/QRScannerModal';
-import { EquipoQRModal } from '../components/EquipoQRModal';
 import { ComoUsarSection } from '../components/ComoUsarSection';
+import dynamic from 'next/dynamic';
+
+const QRScannerModal = dynamic(
+  () => import('../components/QRScannerModal').then((mod) => mod.QRScannerModal),
+  { ssr: false }
+);
+
+const EquipoQRModal = dynamic(
+  () => import('../components/EquipoQRModal').then((mod) => mod.EquipoQRModal),
+  { ssr: false }
+);
 import { extractEquipoCode } from '../lib/utils/auth-helpers';
 import {
   QrCode,
@@ -59,6 +68,11 @@ export default function HomePage() {
       setEquipos(eqs);
       setPerfil(authInfo.perfil);
       setOperadores(ops);
+
+      // Pre-cargar la plantilla activa en caché IndexedDB en segundo plano para disponibilidad offline
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        fetchActiveChecklistTemplate().catch(() => {});
+      }
     } catch (err) {
       console.error('Error loading initial data:', err);
     } finally {
@@ -68,6 +82,15 @@ export default function HomePage() {
 
   useEffect(() => {
     loadData();
+
+    // Pre-calentar chunks dinámicos en segundo plano cuando hay conexión para disponibilidad offline
+    if (typeof window !== 'undefined' && navigator.onLine) {
+      const timer = setTimeout(() => {
+        import('../components/QRScannerModal').catch(() => {});
+        import('../components/EquipoQRModal').catch(() => {});
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
 
     const handleAuthChange = () => loadData();
     window.addEventListener('tpm_auth_changed', handleAuthChange);
@@ -188,9 +211,9 @@ export default function HomePage() {
   const fueraServicio = equipos.filter((e) => e.estado === 'fuera_de_servicio').length;
 
   return (
-    <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5 sm:py-8 w-full space-y-5 sm:space-y-6">
+    <div className="max-w-6xl mx-auto px-3 sm:px-6 py-5 sm:py-8 w-full space-y-5 sm:space-y-6 animate-fade-in">
       {/* Industrial Plant Banner */}
-      <div className="bg-[#111724] border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
+      <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5 max-w-xl">
             <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 text-[11px] font-bold uppercase tracking-wider border border-amber-500/30">
@@ -207,15 +230,15 @@ export default function HomePage() {
 
           {/* Plant Telemetry Counters */}
           <div className="grid grid-cols-3 gap-2 sm:gap-2.5 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-800/80">
-            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 sm:p-3 text-center min-w-[80px]">
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2 sm:p-3 text-center min-w-[68px] sm:min-w-[80px]">
               <span className="text-[10px] font-bold uppercase text-slate-400 block">Flota</span>
               <span className="text-lg sm:text-xl font-black text-white font-mono font-tabular">{totalEquipos}</span>
             </div>
-            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-2.5 sm:p-3 text-center min-w-[80px]">
+            <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-2 sm:p-3 text-center min-w-[68px] sm:min-w-[80px]">
               <span className="text-[10px] font-bold uppercase text-emerald-400 block">Operat.</span>
               <span className="text-lg sm:text-xl font-black text-emerald-300 font-mono font-tabular">{operativos}</span>
             </div>
-            <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2.5 sm:p-3 text-center min-w-[80px]">
+            <div className="bg-rose-950/30 border border-rose-500/30 rounded-xl p-2 sm:p-3 text-center min-w-[68px] sm:min-w-[80px]">
               <span className="text-[10px] font-bold uppercase text-rose-400 block">Parados</span>
               <span className="text-lg sm:text-xl font-black text-rose-300 font-mono font-tabular">{fueraServicio}</span>
             </div>
@@ -312,7 +335,7 @@ export default function HomePage() {
               value={manualInput}
               onChange={(e) => setManualInput(e.target.value)}
               placeholder="Ingresar número de interno (ej: 01, 02) o código QR (ej: AE-01)..."
-              className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+              className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-slate-700/80 focus:border-amber-500 rounded-xl text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
             />
           </div>
           <button
@@ -452,22 +475,22 @@ export default function HomePage() {
             {equipos.map((equipo) => (
               <div
                 key={equipo.id}
-                className="bg-[#111724] border border-slate-800/90 hover:border-slate-700 rounded-2xl p-4 sm:p-5 transition shadow-xs flex flex-col justify-between space-y-3"
+                className="bg-[#111724] border border-slate-800/90 hover:border-slate-700 rounded-2xl p-4 sm:p-5 transition shadow-xs flex flex-col justify-between space-y-3 card-hover"
               >
                 {/* Card Header */}
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-amber-400 font-black text-xl font-mono shadow-inner">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center text-amber-400 font-black text-xl font-mono shadow-inner shrink-0">
                       {equipo.interno}
                     </div>
-                    <div>
+                    <div className="min-w-0 truncate">
                       <div className="font-mono text-xs font-bold text-amber-400">
                         QR: {equipo.qr_codigo}
                       </div>
-                      <h3 className="font-bold text-base text-white">
+                      <h3 className="font-bold text-base text-white truncate">
                         Interno #{equipo.interno} — {equipo.marca}
                       </h3>
-                      <p className="text-xs text-slate-400 font-medium">{equipo.modelo}</p>
+                      <p className="text-xs text-slate-400 font-medium truncate">{equipo.modelo}</p>
                     </div>
                   </div>
 
@@ -482,14 +505,14 @@ export default function HomePage() {
                 </div>
 
                 {/* Telemetry Strip */}
-                <div className="grid grid-cols-2 gap-2 text-xs bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/70">
+                <div className="grid grid-cols-1 min-[380px]:grid-cols-2 gap-2 text-xs bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/70">
                   <div className="flex items-center gap-1.5 text-slate-300">
-                    <Gauge size={13} className="text-amber-400" />
+                    <Gauge size={13} className="text-amber-400 shrink-0" />
                     <span className="text-slate-400 font-medium">Horómetro:</span>
                     <strong className="font-mono font-tabular text-white ml-auto">{equipo.horometro_actual.toFixed(1)} hs</strong>
                   </div>
                   <div className="flex items-center gap-1.5 text-slate-300">
-                    <Fuel size={13} className="text-slate-400" />
+                    <Fuel size={13} className="text-slate-400 shrink-0" />
                     <span className="text-slate-400 font-medium">Combustible:</span>
                     <strong className="text-white ml-auto">{equipo.combustible || 'N/A'}</strong>
                   </div>
@@ -525,27 +548,33 @@ export default function HomePage() {
       <ComoUsarSection />
 
       {/* QR Camera Modal Principal (Autoelevadores o Credenciales) */}
-      <QRScannerModal
-        isOpen={scannerOpen}
-        mode="equipo"
-        onClose={() => setScannerOpen(false)}
-        onScanSuccess={handleScanResult}
-      />
+      {scannerOpen && (
+        <QRScannerModal
+          isOpen={scannerOpen}
+          mode="equipo"
+          onClose={() => setScannerOpen(false)}
+          onScanSuccess={handleScanResult}
+        />
+      )}
 
       {/* QR Camera Modal Dedicado a Credenciales de Operador */}
-      <QRScannerModal
-        isOpen={operatorScannerOpen}
-        mode="operador"
-        onClose={() => setOperatorScannerOpen(false)}
-        onScanSuccess={handleScanResult}
-      />
+      {operatorScannerOpen && (
+        <QRScannerModal
+          isOpen={operatorScannerOpen}
+          mode="operador"
+          onClose={() => setOperatorScannerOpen(false)}
+          onScanSuccess={handleScanResult}
+        />
+      )}
 
       {/* Modal para Visualizar y Descargar QR Grande */}
-      <EquipoQRModal
-        isOpen={Boolean(selectedQrEquipo)}
-        onClose={() => setSelectedQrEquipo(null)}
-        equipo={selectedQrEquipo}
-      />
+      {Boolean(selectedQrEquipo) && (
+        <EquipoQRModal
+          isOpen={Boolean(selectedQrEquipo)}
+          onClose={() => setSelectedQrEquipo(null)}
+          equipo={selectedQrEquipo}
+        />
+      )}
     </div>
   );
 }

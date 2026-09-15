@@ -1,29 +1,5 @@
 import { InspeccionPayload, OfflineQueuedInspeccion } from '../types/tpm';
-
-const DB_NAME = 'tpm_offline_db';
-const DB_VERSION = 1;
-const STORE_NAME = 'inspecciones_queue';
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined' || !window.indexedDB) {
-      reject(new Error('IndexedDB not supported or running on server'));
-      return;
-    }
-
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME, { keyPath: 'id' });
-      }
-    };
-
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
+import { openDB, QUEUE_STORE as STORE_NAME } from './db';
 
 /**
  * Encola una inspección terminada en IndexedDB si no hay conexión o falla el envío.

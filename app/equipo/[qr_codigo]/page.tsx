@@ -5,10 +5,16 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { fetchEquipoByQR, fetchInspeccionesByEquipo } from '../../../lib/api/tpm';
 import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
+import { createClient } from '../../../lib/supabase/client';
 import { Equipo, Perfil, InspeccionConDetalle } from '../../../lib/types/tpm';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { MantenimientoBadge } from '../../../components/MantenimientoBadge';
-import { EquipoQRModal } from '../../../components/EquipoQRModal';
+import dynamic from 'next/dynamic';
+
+const EquipoQRModal = dynamic(
+  () => import('../../../components/EquipoQRModal').then((mod) => mod.EquipoQRModal),
+  { ssr: false }
+);
 import { formatDate } from '../../../lib/utils';
 import { extractEquipoCode } from '../../../lib/utils/auth-helpers';
 import {
@@ -59,33 +65,62 @@ export default function EquipoFichaPage() {
       if (!qrCodigo) return;
       setLoading(true);
       try {
-        // Verificar sesión activa
-        const authInfo = await getCurrentSessionAndProfile();
-        if (!authInfo.user) {
+        const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+        let currentUser = null;
+        let currentPerfil = null;
+
+        if (isOffline) {
+          const supabase = createClient();
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            currentUser = session.user;
+            currentPerfil = {
+              id: session.user.id,
+              nombre: session.user.user_metadata?.nombre || 'Operador',
+              legajo: session.user.user_metadata?.legajo || null,
+              rol: session.user.user_metadata?.rol || 'operador',
+              created_at: session.user.created_at || new Date().toISOString(),
+            };
+          }
+        } else {
+          const authInfo = await getCurrentSessionAndProfile();
+          currentUser = authInfo.user;
+          currentPerfil = authInfo.perfil;
+        }
+
+        if (!currentUser) {
           // No autenticado: preservar destino y redirigir a /login
           const targetPath = `/equipo/${encodeURIComponent(qrCodigo)}`;
           router.replace(`/login?redirect=${encodeURIComponent(targetPath)}`);
           return;
         }
 
-        setOperador(authInfo.perfil);
+        setOperador(currentPerfil);
 
-        const eqData = await fetchEquipoByQR(qrCodigo);
+        try {
+          const eqData = await fetchEquipoByQR(qrCodigo);
+          if (eqData) {
+            setEquipo(eqData);
+            setHorometro(eqData.horometro_actual.toString());
 
-        if (eqData) {
-          setEquipo(eqData);
-          setHorometro(eqData.horometro_actual.toString());
-
-          // Cargar historial de inspecciones de este equipo
-          try {
-            setLoadingInspecciones(true);
-            const history = await fetchInspeccionesByEquipo(eqData.id);
-            setInspecciones(history);
-          } catch (histErr) {
-            console.error('Error fetching historial de inspecciones:', histErr);
-          } finally {
-            setLoadingInspecciones(false);
+            // Cargar historial de inspecciones solo si hay conexión
+            if (!isOffline) {
+              try {
+                setLoadingInspecciones(true);
+                const history = await fetchInspeccionesByEquipo(eqData.id);
+                setInspecciones(history);
+              } catch (histErr) {
+                console.error('Error fetching historial de inspecciones:', histErr);
+              } finally {
+                setLoadingInspecciones(false);
+              }
+            } else {
+              setLoadingInspecciones(false);
+            }
           }
+        } catch (eqErr: any) {
+          console.error('Error fetching equipo by QR:', eqErr);
+          toast.error(eqErr?.message || 'No se pudo cargar la información del autoelevador');
         }
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -175,8 +210,8 @@ export default function EquipoFichaPage() {
   );
 
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-6 py-5 sm:py-8 w-full space-y-5 sm:space-y-6">
-      {/* Back button */}
+    <div className="max-w-4xl mx-auto px-3 sm:px-6 py-5 sm:py-8 w-full space-y-6 animate-fade-in">
+      {/* Back navigation */}
       <Link
         href="/"
         className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-white transition btn-tactile"
@@ -751,11 +786,13 @@ export default function EquipoFichaPage() {
       )}
 
       {/* Modal para Visualizar y Descargar QR Grande */}
-      <EquipoQRModal
-        isOpen={showQrModal}
-        onClose={() => setShowQrModal(false)}
-        equipo={equipo}
-      />
+      {showQrModal && (
+        <EquipoQRModal
+          isOpen={showQrModal}
+          onClose={() => setShowQrModal(false)}
+          equipo={equipo}
+        />
+      )}
     </div>
   );
 }

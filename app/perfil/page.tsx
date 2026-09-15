@@ -165,8 +165,9 @@ export default function MiPerfilPage() {
     toast.info('Sesión finalizada');
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-      window.location.href = '/';
     }
+    router.replace('/');
+    router.refresh();
   };
 
   if (loading) {
@@ -183,7 +184,7 @@ export default function MiPerfilPage() {
   if (!perfil) return null;
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 sm:py-10 w-full space-y-6">
+    <div className="max-w-2xl mx-auto px-3 sm:px-4 py-6 sm:py-10 w-full space-y-6 animate-fade-in">
       {/* Botón Volver */}
       <Link
         href="/"
@@ -196,7 +197,7 @@ export default function MiPerfilPage() {
       {/* Tarjeta Principal de Perfil */}
       <div className="bg-[#111724] border border-slate-800/90 rounded-2xl shadow-xl shadow-black/40 overflow-hidden">
         {/* Cabecera Técnica */}
-        <div className="p-5 sm:p-6 border-b border-slate-800/90 bg-[#0E1420] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="p-4 sm:p-6 border-b border-slate-800/90 bg-[#0E1420] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
             <div className="w-14 h-14 rounded-xl bg-[#0B0F17] border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner shrink-0">
               <User size={28} />
@@ -237,7 +238,7 @@ export default function MiPerfilPage() {
         </div>
 
         {/* Formulario / Datos */}
-        <form onSubmit={handleSaveProfile} className="p-5 sm:p-6 space-y-5">
+        <form onSubmit={handleSaveProfile} className="p-4 sm:p-6 space-y-5">
           {/* Alerta Informativa */}
           <div className="p-3 rounded-xl bg-[#0B0F17] border border-slate-800/90 flex items-start gap-2.5 text-xs text-slate-400">
             <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
@@ -260,7 +261,7 @@ export default function MiPerfilPage() {
                     value={formNombre}
                     onChange={(e) => setFormNombre(e.target.value)}
                     placeholder="Ej: Juan Pérez"
-                    className="w-full px-3.5 py-3 bg-[#0B0F17] border border-amber-500/60 rounded-xl text-sm text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition font-medium"
+                    className="w-full px-3.5 py-3 bg-[#0B0F17] border border-amber-500/60 rounded-xl text-base sm:text-sm text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition font-medium"
                     autoFocus
                   />
                 </div>
@@ -286,7 +287,7 @@ export default function MiPerfilPage() {
                     value={formLegajo}
                     onChange={(e) => setFormLegajo(e.target.value)}
                     placeholder="Ej: 4029"
-                    className="w-full px-3.5 py-3 bg-[#0B0F17] border border-amber-500/60 rounded-xl text-sm text-amber-400 font-mono font-tabular font-bold focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
+                    className="w-full px-3.5 py-3 bg-[#0B0F17] border border-amber-500/60 rounded-xl text-base sm:text-sm text-amber-400 font-mono font-tabular font-bold focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition"
                   />
                 </div>
               ) : (

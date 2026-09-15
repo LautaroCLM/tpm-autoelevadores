@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signInWithCredentials, getCurrentSessionAndProfile } from '../../lib/api/auth';
 import { sanitizeRedirectUrl } from '../../lib/utils/auth-helpers';
@@ -9,6 +9,7 @@ import { ShieldCheck, Lock, User, ArrowRight, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
 
 function LoginForm() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -35,11 +36,11 @@ function LoginForm() {
           perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
         const target = sanitizeRedirectUrl(rawRedirect, fallbackTarget);
         if (target && target !== '/login') {
-          window.location.href = target;
+          router.replace(target);
         }
       }
     });
-  }, [searchParams]);
+  }, [searchParams, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,8 +79,9 @@ function LoginForm() {
         const targetUrl = sanitizeRedirectUrl(rawRedirect, defaultTarget);
         const finalTarget = targetUrl === '/login' ? defaultTarget : targetUrl;
 
-        // window.location.href asegura invalidación del router cache y envío de cookies SSR
-        window.location.href = finalTarget;
+        // Navegación SPA con invalidación controlada del cache de Next.js
+        router.replace(finalTarget);
+        router.refresh();
       } else {
         toast.error(res.error || 'Credenciales incorrectas');
         setLoading(false);
@@ -91,7 +93,7 @@ function LoginForm() {
   };
 
   return (
-    <div className="max-w-md mx-auto px-4 py-8 sm:py-16 w-full space-y-6">
+    <div className="max-w-md mx-auto px-3 sm:px-4 py-8 sm:py-16 w-full space-y-6 animate-fade-in">
       <Link
         href="/"
         className="inline-flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-slate-400 hover:text-white transition"
@@ -100,7 +102,7 @@ function LoginForm() {
         <span>Volver a la consola principal</span>
       </Link>
 
-      <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-6 sm:p-8 shadow-2xl shadow-black/60 space-y-6 relative overflow-hidden">
+      <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-8 shadow-2xl shadow-black/60 space-y-6 relative overflow-hidden">
         {/* Plant Header Badge */}
         <div className="space-y-3 text-center">
           <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-inner">
@@ -132,7 +134,7 @@ function LoginForm() {
                 onChange={(e) => setIdentifier(e.target.value)}
                 required
                 placeholder="Ej: 4029 o supervisor@tpm.com"
-                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
+                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-base sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
               />
             </div>
           </div>
@@ -149,7 +151,7 @@ function LoginForm() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
+                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-base sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
               />
             </div>
           </div>
