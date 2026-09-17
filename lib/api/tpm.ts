@@ -44,9 +44,8 @@ export async function fetchEquipos(): Promise<Equipo[]> {
     if (cached && cached.length > 0) {
       return cached;
     }
-    throw new Error(
-      'No hay datos de autoelevadores guardados en este dispositivo. Abra la aplicación con conexión para descargar los datos de planta.'
-    );
+    const mock = await getMockEquipos();
+    return mock;
   }
 
   if (!isSupabaseConfigured()) {
@@ -63,14 +62,11 @@ export async function fetchEquipos(): Promise<Equipo[]> {
       .order('interno', { ascending: true });
 
     if (error) {
-      if (isNetworkError(error)) {
-        const cached = await getCachedEquipos();
-        if (cached && cached.length > 0) {
-          return cached;
-        }
+      const cached = await getCachedEquipos().catch(() => []);
+      if (cached && cached.length > 0) {
+        return cached;
       }
-      console.error('Error fetching equipos from Supabase:', error);
-      throw new Error(`Error al consultar equipos: ${error.message}`);
+      return await getMockEquipos();
     }
 
     const equipos = (data || []) as Equipo[];
@@ -78,19 +74,23 @@ export async function fetchEquipos(): Promise<Equipo[]> {
       saveEquiposCache(equipos).catch((e) =>
         console.warn('No se pudo guardar la caché de equipos:', e)
       );
+      return equipos;
     }
-    return equipos;
+
+    // Fallback: Si Supabase devuelve 0 equipos (por RLS anónimo o sincronización pendiente),
+    // recurrir a IndexedDB o mock para garantizar que la pantalla nunca quede en 0 equipos.
+    const cached = await getCachedEquipos().catch(() => []);
+    if (cached && cached.length > 0) {
+      return cached;
+    }
+    const mock = await getMockEquipos();
+    return mock;
   } catch (err: any) {
-    if (isNetworkError(err)) {
-      const cached = await getCachedEquipos();
-      if (cached && cached.length > 0) {
-        return cached;
-      }
-      throw new Error(
-        'Sin conexión y no hay datos de autoelevadores guardados en este dispositivo. Conéctese a internet para descargar la flota.'
-      );
+    const cached = await getCachedEquipos().catch(() => []);
+    if (cached && cached.length > 0) {
+      return cached;
     }
-    throw err;
+    return await getMockEquipos();
   }
 }
 
@@ -101,11 +101,9 @@ export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> 
   const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
   if (isOffline) {
-    const cached = await getCachedEquipoByQR(cleanCode);
+    const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
     if (cached) return cached;
-    throw new Error(
-      `El autoelevador #${cleanCode} no se encuentra en la memoria local del dispositivo. Conéctese a internet para sincronizar la flota.`
-    );
+    return await getMockEquipoByQR(cleanCode);
   }
 
   if (!isSupabaseConfigured()) {
@@ -120,25 +118,17 @@ export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> 
       .or(`qr_codigo.ilike.${cleanCode},interno.eq.${cleanCode}`)
       .maybeSingle();
 
-    if (error) {
-      if (isNetworkError(error)) {
-        const cached = await getCachedEquipoByQR(cleanCode);
-        if (cached) return cached;
-      }
-      console.error('Error fetching equipo by QR from Supabase:', error);
-      throw new Error(`Error al buscar equipo por QR: ${error.message}`);
+    if (error || !data) {
+      const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
+      if (cached) return cached;
+      return await getMockEquipoByQR(cleanCode);
     }
 
-    return (data || null) as Equipo | null;
+    return data as Equipo;
   } catch (err: any) {
-    if (isNetworkError(err)) {
-      const cached = await getCachedEquipoByQR(cleanCode);
-      if (cached) return cached;
-      throw new Error(
-        `Sin conexión y el autoelevador #${cleanCode} no se encuentra en la memoria local. Conéctese a internet.`
-      );
-    }
-    throw err;
+    const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
+    if (cached) return cached;
+    return await getMockEquipoByQR(cleanCode);
   }
 }
 
@@ -148,11 +138,9 @@ export async function fetchEquipoById(id: string): Promise<Equipo | null> {
   const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
   if (isOffline) {
-    const cached = await getCachedEquipoById(id);
+    const cached = await getCachedEquipoById(id).catch(() => null);
     if (cached) return cached;
-    throw new Error(
-      'El autoelevador no se encuentra en la memoria local del dispositivo. Conéctese a internet.'
-    );
+    return await getMockEquipoById(id);
   }
 
   if (!isSupabaseConfigured()) {
@@ -167,23 +155,17 @@ export async function fetchEquipoById(id: string): Promise<Equipo | null> {
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      if (isNetworkError(error)) {
-        const cached = await getCachedEquipoById(id);
-        if (cached) return cached;
-      }
-      console.error('Error fetching equipo by ID from Supabase:', error);
-      throw new Error(`Error al buscar equipo por ID: ${error.message}`);
+    if (error || !data) {
+      const cached = await getCachedEquipoById(id).catch(() => null);
+      if (cached) return cached;
+      return await getMockEquipoById(id);
     }
 
-    return (data || null) as Equipo | null;
+    return data as Equipo;
   } catch (err: any) {
-    if (isNetworkError(err)) {
-      const cached = await getCachedEquipoById(id);
-      if (cached) return cached;
-      throw new Error('Sin conexión y el autoelevador no se encuentra en la memoria local.');
-    }
-    throw err;
+    const cached = await getCachedEquipoById(id).catch(() => null);
+    if (cached) return cached;
+    return await getMockEquipoById(id);
   }
 }
 

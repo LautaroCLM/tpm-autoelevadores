@@ -13,3 +13,4 @@ tsconfig.tsbuildinfo
 .env*
 .credenciales-rotadas.txt
 .credenciales*
+supabase/.temp
