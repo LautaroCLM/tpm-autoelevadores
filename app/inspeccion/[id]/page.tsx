@@ -43,6 +43,8 @@ import {
   Edit2,
   Sparkles,
   Info,
+  Clock,
+  HelpCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -77,8 +79,35 @@ export default function InspeccionChecklistPage() {
     fallasCount: number;
   } | null>(null);
 
+  // Modal para confirmar abandono de inspección con respuestas cargadas
+  const [leaveModalOpen, setLeaveModalOpen] = useState(false);
+
   const startTime = useMemo(() => new Date().toISOString(), []);
   const [clientGeneratedId] = useState<string>(() => crypto.randomUUID());
+
+  // Contadores de progreso y verificación de borradores no guardados
+  const answeredCount = useMemo(() => {
+    return Object.values(responses).filter(
+      (r) =>
+        r.valor_bool !== null ||
+        r.valor_numero !== null ||
+        (r.valor_texto && r.valor_texto.length > 0)
+    ).length;
+  }, [responses]);
+
+  const hasUnsavedAnswers = answeredCount > 0 && !completedResult && !isSubmitting;
+
+  // Protección del navegador (cerrar pestaña / recargar)
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedAnswers) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedAnswers]);
 
   useEffect(() => {
     async function initData() {
@@ -212,9 +241,6 @@ export default function InspeccionChecklistPage() {
 
   // Contadores de progreso
   const totalItems = items.length;
-  const answeredCount = Object.values(responses).filter(
-    (r) => r.valor_bool !== null || r.valor_numero !== null || (r.valor_texto && r.valor_texto.length > 0)
-  ).length;
   const progressPercent = totalItems > 0 ? Math.round((answeredCount / totalItems) * 100) : 0;
 
   // Handlers para marcar items
@@ -469,7 +495,7 @@ export default function InspeccionChecklistPage() {
         </div>
 
         <div className="space-y-1.5">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400 font-mono">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-slate-900 border border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400 font-mono">
             Checklist Registrado Exitosamente
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
@@ -534,12 +560,20 @@ export default function InspeccionChecklistPage() {
     );
   }
 
+  const handleBackClick = () => {
+    if (hasUnsavedAnswers) {
+      setLeaveModalOpen(true);
+    } else {
+      router.push(`/equipo/${equipo?.qr_codigo}`);
+    }
+  };
+
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-6 py-4 sm:py-6 w-full space-y-4 pb-32 animate-fade-in">
       {/* Top Header info */}
       <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
         <button
-          onClick={() => router.push(`/equipo/${equipo.qr_codigo}`)}
+          onClick={handleBackClick}
           className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer btn-tactile"
         >
           <ArrowLeft size={14} /> <span>Ficha Interno #{equipo.interno}</span>
@@ -658,10 +692,10 @@ export default function InspeccionChecklistPage() {
               key={item.id}
               className={`bg-[#111724] border rounded-2xl p-4 sm:p-5 transition shadow-xs space-y-3 ${
                 isFalla
-                  ? 'border-rose-500/60 bg-rose-950/15'
+                  ? 'border-rose-500/70 bg-rose-950/20'
                   : isOk
-                  ? 'border-emerald-500/40 bg-[#111724]'
-                  : 'border-slate-800'
+                  ? 'border-emerald-500/50 bg-emerald-950/15'
+                  : 'border-amber-500/30 bg-[#111724]'
               }`}
             >
               {/* Item Header */}
@@ -675,8 +709,16 @@ export default function InspeccionChecklistPage() {
                   </h3>
                 </div>
 
-                {isFalla && resp.falla && (
+                {isFalla && resp.falla ? (
                   <GravedadBadge gravedad={resp.falla.gravedad} size="sm" />
+                ) : isOk ? (
+                  <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 flex items-center gap-1">
+                    <CheckCircle2 size={11} /> Conforme
+                  </span>
+                ) : (
+                  <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-950/80 text-amber-300 border border-amber-500/50 flex items-center gap-1">
+                    <Clock size={11} /> Pendiente
+                  </span>
                 )}
               </div>
 
@@ -854,6 +896,47 @@ export default function InspeccionChecklistPage() {
           onSave={handleSaveFalla}
           onCancel={() => setModalItem(null)}
         />
+      )}
+
+      {/* Modal de Confirmación al Intentar Salir con Respuestas Cargadas */}
+      {leaveModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111724] border border-slate-800 rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl animate-fade-in">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-white">¿Abandonar Inspección?</h3>
+                <p className="text-xs text-slate-400">Tenés {answeredCount} respuesta(s) cargada(s) sin enviar.</p>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+              Si salís ahora, se perderán todas las respuestas ingresadas en esta inspección de turno.
+            </p>
+
+            <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setLeaveModalOpen(false)}
+                className="flex-1 min-h-[44px] py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition cursor-pointer btn-tactile shadow-xs"
+              >
+                Continuar Inspección
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLeaveModalOpen(false);
+                  router.push(`/equipo/${equipo.qr_codigo}`);
+                }}
+                className="flex-1 min-h-[44px] py-2.5 px-4 bg-slate-900 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-750 hover:border-rose-500/50 font-bold text-xs sm:text-sm rounded-xl transition cursor-pointer btn-tactile"
+              >
+                Abandonar y Descartar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

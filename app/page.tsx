@@ -7,6 +7,7 @@ import { fetchEquipos, fetchActiveChecklistTemplate } from '../lib/api/tpm';
 import {
   getCurrentSessionAndProfile,
   signInOperatorWithQR,
+  quickSignInOperator,
   fetchOperadores,
   signOutUser,
 } from '../lib/api/auth';
@@ -127,6 +128,38 @@ export default function HomePage() {
     toast.info('Sesión cerrada correctamente');
   };
 
+  const handleQuickSelectOperator = async (op: Perfil) => {
+    if (perfil?.id === op.id) {
+      toast.info(`Ya estás operando como ${op.nombre}`);
+      return;
+    }
+
+    toast.loading(`Iniciando sesión como ${op.nombre}...`);
+    try {
+      const res = await quickSignInOperator(op);
+      toast.dismiss();
+      if (res.success && res.perfil) {
+        setPerfil(res.perfil);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+        }
+        toast.success(`¡Bienvenido/a, ${res.perfil.nombre}!`);
+
+        setTimeout(() => {
+          const fleetSection = document.getElementById('seccion-autoelevadores');
+          if (fleetSection) {
+            fleetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 150);
+      } else {
+        toast.error(res.error || 'No se pudo seleccionar el operador');
+      }
+    } catch (err: any) {
+      toast.dismiss();
+      toast.error(err?.message || 'Error al seleccionar operador');
+    }
+  };
+
 
 
   const handleScanResult = async (code: string) => {
@@ -183,7 +216,7 @@ export default function HomePage() {
       <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1.5 max-w-xl">
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-amber-500/15 text-amber-300 text-[11px] font-bold uppercase tracking-wider border border-amber-500/30">
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-amber-950/80 text-amber-300 text-[10px] font-mono font-bold uppercase tracking-wider border border-amber-500/40">
               <Shield size={12} />
               <span>TPM Nivel 1 • Operación y Mantenimiento</span>
             </div>
@@ -215,17 +248,16 @@ export default function HomePage() {
 
       {/* Active Session Card */}
       {perfil ? (
-        <div className="bg-emerald-950/25 border border-emerald-500/35 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3 shadow-xs">
+        <div className="bg-emerald-950/25 border border-emerald-500/35 rounded-2xl p-3.5 sm:p-4 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-xs">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500 text-slate-950 flex items-center justify-center font-black shrink-0">
               <UserCheck size={20} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-wider">
                   Operador en Turno Activo
                 </span>
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               </div>
               <p className="text-sm sm:text-base font-black text-white">
                 {perfil.nombre} {perfil.legajo ? <span className="font-mono text-xs text-slate-300 font-bold ml-1">(Legajo #{perfil.legajo})</span> : ''}
@@ -315,28 +347,29 @@ export default function HomePage() {
         </form>
       </div>
 
-      {/* Botones de Acceso Rápido por Credencial QR */}
+      {/* Botones de Acceso Rápido por Selección de Operador */}
       <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-amber-400" />
               <h2 className="text-sm sm:text-base font-black text-white">
-                Operadores de Planta — Validación por Credencial QR
+                Operadores de Planta — Accesos Rápidos
               </h2>
             </div>
             <p className="text-xs text-slate-400">
-              Presentá tu credencial física QR frente a la cámara para iniciar tu turno de operación:
+              Seleccioná tu usuario para iniciar sesión rápidamente en tu turno de trabajo:
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => setOperatorScannerOpen(true)}
-            className="self-start sm:self-auto text-xs font-bold text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60 bg-amber-500/10 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer btn-tactile shadow-xs"
+            className="self-start sm:self-auto text-xs font-bold text-slate-400 hover:text-amber-300 border border-slate-750 hover:border-amber-500/60 bg-slate-900 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer btn-tactile shadow-xs"
+            title="Escanear credencial QR alternativa"
           >
-            <Camera size={14} />
-            <span>Escanear Credencial QR</span>
+            <Camera size={13} />
+            <span>Escáner QR Secundario</span>
           </button>
         </div>
 
@@ -359,9 +392,9 @@ export default function HomePage() {
                 <button
                   key={op.id}
                   type="button"
-                  onClick={() => setOperatorScannerOpen(true)}
-                  title={`Escanear credencial QR de ${op.nombre}`}
-                  className={`p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer btn-tactile ${
+                  onClick={() => handleQuickSelectOperator(op)}
+                  title={`Ingresar como ${op.nombre}`}
+                  className={`p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer btn-tactile group ${
                     isActive
                       ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/40 shadow-xs'
                       : 'bg-slate-950/80 hover:bg-slate-900 border-slate-800 hover:border-amber-500/50'
@@ -394,14 +427,14 @@ export default function HomePage() {
                   </div>
 
                   {isActive ? (
-                    <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                    <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 flex items-center gap-1">
                       <CheckCircle2 size={10} />
                       <span>Activo</span>
                     </span>
                   ) : (
-                    <span className="shrink-0 text-[11px] font-bold text-slate-500 group-hover:text-amber-400 flex items-center gap-1">
-                      <Camera size={11} />
-                      <span>QR</span>
+                    <span className="shrink-0 text-[11px] font-bold text-slate-400 group-hover:text-amber-400 flex items-center gap-1">
+                      <UserCheck size={12} />
+                      <span>Ingresar</span>
                     </span>
                   )}
                 </button>

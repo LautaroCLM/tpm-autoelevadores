@@ -14,24 +14,23 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   showIcon = true,
 }) => {
   const sizeClasses = {
-    sm: 'text-[10px] px-2 py-0.5 gap-1.5 font-bold tracking-wider uppercase',
-    md: 'text-xs px-2.5 py-1 gap-1.5 font-bold tracking-wider uppercase',
-    lg: 'text-sm px-3.5 py-1.5 gap-2 font-black tracking-wider uppercase',
+    sm: 'text-[10px] px-2 py-0.5 gap-1.5 font-mono font-bold tracking-wider uppercase',
+    md: 'text-xs px-2.5 py-1 gap-1.5 font-mono font-bold tracking-wider uppercase',
+    lg: 'text-sm px-3 py-1.5 gap-2 font-mono font-black tracking-wider uppercase',
   };
 
   const iconSizes = {
-    sm: 12,
-    md: 14,
-    lg: 16,
+    sm: 11,
+    md: 13,
+    lg: 15,
   };
 
   switch (estado) {
     case 'operativo':
       return (
         <span
-          className={`inline-flex items-center rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 shadow-xs ${sizeClasses[size]}`}
+          className={`inline-flex items-center rounded bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 ${sizeClasses[size]}`}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
           {showIcon && <CheckCircle2 size={iconSizes[size]} className="text-emerald-400 shrink-0" />}
           <span>Operativo</span>
         </span>
@@ -39,9 +38,8 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     case 'observado':
       return (
         <span
-          className={`inline-flex items-center rounded-lg bg-amber-950/60 text-amber-300 border border-amber-500/45 shadow-xs ${sizeClasses[size]}`}
+          className={`inline-flex items-center rounded bg-amber-950/80 text-amber-300 border border-amber-500/50 ${sizeClasses[size]}`}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
           {showIcon && <AlertTriangle size={iconSizes[size]} className="text-amber-400 shrink-0" />}
           <span>Observado</span>
         </span>
@@ -49,19 +47,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     case 'fuera_de_servicio':
       return (
         <span
-          className={`inline-flex items-center rounded-lg bg-rose-950/80 text-rose-200 border border-rose-500/60 shadow-xs shadow-rose-950/50 ${sizeClasses[size]}`}
+          className={`inline-flex items-center rounded bg-rose-950/90 text-rose-200 border border-rose-500/70 ${sizeClasses[size]}`}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse shrink-0" />
           {showIcon && <AlertOctagon size={iconSizes[size]} className="text-rose-400 shrink-0" />}
           <span>Fuera de Servicio</span>
         </span>
       );
     default:
       return (
-        <span className={`inline-flex items-center rounded-lg bg-slate-900 text-slate-400 border border-slate-700 ${sizeClasses[size]}`}>
+        <span className={`inline-flex items-center rounded bg-slate-950 text-slate-400 border border-slate-800 ${sizeClasses[size]}`}>
           {estado}
         </span>
       );
   }
 };
-

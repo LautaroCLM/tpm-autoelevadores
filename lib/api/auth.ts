@@ -192,6 +192,67 @@ export async function signInOperatorWithQR(qrString: string): Promise<{
 }
 
 /**
+ * Inicia sesión rápidamente como operador seleccionado desde los accesos rápidos de la planta.
+ */
+export async function quickSignInOperator(op: Perfil): Promise<{
+  success: boolean;
+  user?: any;
+  perfil?: Perfil;
+  error?: string;
+}> {
+  const legajo = op.legajo;
+  if (!legajo) {
+    recordLoginSessionDay();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+    }
+    return { success: true, perfil: op };
+  }
+
+  try {
+    const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+
+    if (!isOffline) {
+      const res = await fetch('/api/auth/quick-operator-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ legajo, profileId: op.id }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.email && data.password) {
+          const authRes = await signInWithCredentials({
+            identifier: data.email,
+            password: data.password,
+          });
+
+          if (authRes.success) {
+            return {
+              success: true,
+              user: authRes.user,
+              perfil: authRes.perfil || op,
+            };
+          }
+        }
+      }
+    }
+
+    recordLoginSessionDay();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+    }
+    return { success: true, perfil: op };
+  } catch {
+    recordLoginSessionDay();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+    }
+    return { success: true, perfil: op };
+  }
+}
+
+/**
  * Inicia sesión para el supervisor mediante email y contraseña.
  */
 export async function signInSupervisor(

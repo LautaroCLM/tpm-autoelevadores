@@ -359,7 +359,7 @@ export default function SupervisorDashboardPage() {
       {/* Header Panel */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/40">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 text-xs font-mono font-bold uppercase tracking-wider mb-2 border border-amber-500/30">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 text-amber-300 text-xs font-mono font-bold uppercase tracking-wider mb-2 border border-amber-500/40">
             <ShieldCheck size={14} />
             Consola Supervisor de Mantenimiento
           </div>
@@ -485,7 +485,7 @@ export default function SupervisorDashboardPage() {
           <AlertOctagon size={16} />
           <span>Fallas ({fallas.length})</span>
           {fallasPendientes > 0 && (
-            <span className="px-1.5 py-0.5 bg-rose-600 text-white rounded text-[10px] font-mono font-bold">
+            <span className="px-1.5 py-0.5 bg-rose-950/90 text-rose-200 border border-rose-500/70 rounded text-[10px] font-mono font-bold">
               {fallasPendientes}
             </span>
           )}
@@ -605,7 +605,7 @@ export default function SupervisorDashboardPage() {
                             (eq.intervalo_mantenimiento_horas || 250).toString()
                           );
                         }}
-                        className="btn-tactile px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-amber-500/30 cursor-pointer"
+                        className="btn-tactile px-2.5 py-1.5 bg-amber-950/60 hover:bg-amber-950/90 text-amber-400 font-mono font-bold text-xs rounded transition flex items-center gap-1.5 border border-amber-500/40 cursor-pointer"
                         title="Registrar mantenimiento preventivo realizado"
                       >
                         <Wrench size={13} className="text-amber-400" />
@@ -676,9 +676,9 @@ export default function SupervisorDashboardPage() {
               <button
                 key={fil.id}
                 onClick={() => setFallaFilter(fil.id)}
-                className={`btn-tactile px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition cursor-pointer border ${
+                className={`btn-tactile px-3 py-1.5 rounded text-xs font-mono font-bold transition cursor-pointer border ${
                   fallaFilter === fil.id
-                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                    ? 'bg-amber-500 text-slate-950 border-amber-400'
                     : 'bg-[#111724] text-slate-400 border-slate-800/90 hover:border-slate-700'
                 }`}
               >
@@ -756,7 +756,7 @@ export default function SupervisorDashboardPage() {
                             key={st}
                             type="button"
                             onClick={() => handleUpdateFallaStatus(falla.id, st)}
-                            className={`btn-tactile px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition capitalize cursor-pointer border ${
+                            className={`btn-tactile px-2.5 py-1 rounded text-xs font-mono font-bold transition capitalize cursor-pointer border ${
                               falla.estado_reparacion === st
                                 ? st === 'cerrado' || st === 'reparado'
                                   ? 'bg-emerald-500 text-slate-950 border-emerald-400'
@@ -998,6 +998,7 @@ export default function SupervisorDashboardPage() {
                   <input
                     type="number"
                     step="0.1"
+                    inputMode="decimal"
                     value={formHorometro}
                     onChange={(e) => setFormHorometro(e.target.value)}
                     className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
@@ -1011,6 +1012,7 @@ export default function SupervisorDashboardPage() {
                   <input
                     type="number"
                     step="0.1"
+                    inputMode="decimal"
                     value={formProximoService}
                     onChange={(e) => setFormProximoService(e.target.value)}
                     className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
@@ -1123,6 +1125,7 @@ export default function SupervisorDashboardPage() {
                   <input
                     type="number"
                     step="0.1"
+                    inputMode="decimal"
                     value={editEquipo.horometro_actual}
                     onChange={(e) =>
                       setEditEquipo({ ...editEquipo, horometro_actual: parseFloat(e.target.value) || 0 })
@@ -1138,6 +1141,7 @@ export default function SupervisorDashboardPage() {
                   <input
                     type="number"
                     step="0.1"
+                    inputMode="decimal"
                     value={editEquipo.horometro_proximo_mantenimiento || ''}
                     onChange={(e) =>
                       setEditEquipo({
@@ -1268,6 +1272,7 @@ export default function SupervisorDashboardPage() {
                     type="number"
                     step="1"
                     min="1"
+                    inputMode="decimal"
                     required
                     value={serviceIntervaloInput}
                     onChange={(e) => setServiceIntervaloInput(e.target.value)}
