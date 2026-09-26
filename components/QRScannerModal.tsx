@@ -84,10 +84,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     }
 
     if (isOpen) {
+      document.body.style.overflow = 'hidden';
       startCamera();
+    } else {
+      document.body.style.overflow = '';
     }
 
     return () => {
+      document.body.style.overflow = '';
       if (scanInterval) clearInterval(scanInterval);
       if (stream) {
         stream.getTracks().forEach((track) => track.stop());
@@ -105,8 +109,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-750 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl space-y-0 relative animate-in fade-in zoom-in-95 duration-200">
+    <div
+      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl space-y-0 relative my-auto animate-in fade-in zoom-in-95 duration-200"
+      >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-850">
           <div className="flex items-center gap-2">
