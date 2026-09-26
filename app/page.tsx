@@ -52,7 +52,6 @@ export default function HomePage() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [operatorScannerOpen, setOperatorScannerOpen] = useState(false);
   const [selectedQrEquipo, setSelectedQrEquipo] = useState<Equipo | null>(null);
-  const [loggingInLegajo, setLoggingInLegajo] = useState<string | null>(null);
 
   // Estado del usuario activo
   const [perfil, setPerfil] = useState<Perfil | null>(null);
@@ -128,39 +127,7 @@ export default function HomePage() {
     toast.info('Sesión cerrada correctamente');
   };
 
-  // Login rápido de operador por selección directa
-  const handleOperatorQuickLogin = async (op: Perfil) => {
-    if (!op.legajo) {
-      toast.warning(`El operador ${op.nombre} no tiene número de legajo configurado`);
-      return;
-    }
 
-    setLoggingInLegajo(op.legajo);
-    try {
-      const res = await signInOperatorWithQR(`TPM:OP:${op.legajo}`);
-      if (res.success && res.perfil) {
-        setPerfil(res.perfil);
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-        }
-        toast.success(`Operador Activo: ${res.perfil.nombre}`);
-
-        // Transición automática suave al paso de escanear o seleccionar autoelevador
-        setTimeout(() => {
-          const fleetSection = document.getElementById('seccion-autoelevadores');
-          if (fleetSection) {
-            fleetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }, 150);
-      } else {
-        toast.error(res.error || 'No se pudo autenticar al operador');
-      }
-    } catch (err: any) {
-      toast.error(err?.message || 'Error al iniciar sesión de operador');
-    } finally {
-      setLoggingInLegajo(null);
-    }
-  };
 
   const handleScanResult = async (code: string) => {
     setScannerOpen(false);
@@ -348,28 +315,28 @@ export default function HomePage() {
         </form>
       </div>
 
-      {/* Botones de Acceso Rápido por Operador Real */}
+      {/* Botones de Acceso Rápido por Credencial QR */}
       <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="space-y-0.5">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-amber-400" />
               <h2 className="text-sm sm:text-base font-black text-white">
-                Operadores de Planta — Acceso Rápido
+                Operadores de Planta — Validación por Credencial QR
               </h2>
             </div>
             <p className="text-xs text-slate-400">
-              Tocá tu nombre para identificarte en el turno sin credencial física:
+              Presentá tu credencial física QR frente a la cámara para iniciar tu turno de operación:
             </p>
           </div>
 
           <button
             type="button"
             onClick={() => setOperatorScannerOpen(true)}
-            className="self-start sm:self-auto text-xs font-bold text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60 bg-amber-500/10 px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 cursor-pointer btn-tactile"
+            className="self-start sm:self-auto text-xs font-bold text-amber-400 hover:text-amber-300 border border-amber-500/30 hover:border-amber-500/60 bg-amber-500/10 px-3.5 py-2 rounded-xl transition flex items-center gap-1.5 cursor-pointer btn-tactile shadow-xs"
           >
-            <Camera size={13} />
-            <span>Escanear Credencial Física</span>
+            <Camera size={14} />
+            <span>Escanear Credencial QR</span>
           </button>
         </div>
 
@@ -387,20 +354,18 @@ export default function HomePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
             {operadores.map((op) => {
               const isActive = perfil?.id === op.id;
-              const isLoggingIn = loggingInLegajo === op.legajo;
 
               return (
                 <button
                   key={op.id}
                   type="button"
-                  onClick={() => handleOperatorQuickLogin(op)}
-                  disabled={isLoggingIn}
-                  title={`Identificarse como ${op.nombre} (Legajo #${op.legajo})`}
+                  onClick={() => setOperatorScannerOpen(true)}
+                  title={`Escanear credencial QR de ${op.nombre}`}
                   className={`p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer btn-tactile ${
                     isActive
                       ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/40 shadow-xs'
                       : 'bg-slate-950/80 hover:bg-slate-900 border-slate-800 hover:border-amber-500/50'
-                  } ${isLoggingIn ? 'opacity-80' : ''}`}
+                  }`}
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <div
@@ -410,17 +375,13 @@ export default function HomePage() {
                           : 'bg-slate-850 text-slate-300 border border-slate-700'
                       }`}
                     >
-                      {isLoggingIn ? (
-                        <RefreshCw size={14} className="animate-spin text-amber-400" />
-                      ) : (
-                        op.nombre
-                          .split(' ')
-                          .filter(Boolean)
-                          .map((n) => n[0])
-                          .join('')
-                          .slice(0, 2)
-                          .toUpperCase()
-                      )}
+                      {op.nombre
+                        .split(' ')
+                        .filter(Boolean)
+                        .map((n) => n[0])
+                        .join('')
+                        .slice(0, 2)
+                        .toUpperCase()}
                     </div>
                     <div className="truncate">
                       <p className="text-xs sm:text-sm font-bold text-white truncate">
@@ -438,8 +399,9 @@ export default function HomePage() {
                       <span>Activo</span>
                     </span>
                   ) : (
-                    <span className="shrink-0 text-[11px] font-bold text-slate-500 group-hover:text-amber-400">
-                      Entrar →
+                    <span className="shrink-0 text-[11px] font-bold text-slate-500 group-hover:text-amber-400 flex items-center gap-1">
+                      <Camera size={11} />
+                      <span>QR</span>
                     </span>
                   )}
                 </button>

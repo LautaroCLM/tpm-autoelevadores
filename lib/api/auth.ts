@@ -164,17 +164,8 @@ export async function signInWithCredentials({
   }
 }
 
-// Credenciales de credencial de planta para acceso rápido y credenciales QR físicas
-const OPERATOR_PLANT_CREDENTIALS: Record<string, string> = {
-  '4029': process.env.NEXT_PUBLIC_OPERATOR_4029_TOKEN || '7ArtDAgF',
-  '5118': process.env.NEXT_PUBLIC_OPERATOR_5118_TOKEN || 'qvBUyzrv',
-  '2045': process.env.NEXT_PUBLIC_OPERATOR_2045_TOKEN || 'YFiRn5SH',
-  '3082': process.env.NEXT_PUBLIC_OPERATOR_3082_TOKEN || 'iZ8Bmenh',
-};
-
 /**
- * Inicia sesión como operador en Supabase Auth mediante el escaneo de su credencial QR
- * o selección de su botón de acceso rápido.
+ * Inicia sesión como operador en Supabase Auth mediante el escaneo de su credencial QR.
  */
 export async function signInOperatorWithQR(qrString: string): Promise<{
   success: boolean;
@@ -187,18 +178,16 @@ export async function signInOperatorWithQR(qrString: string): Promise<{
     return { success: false, error: 'Código QR de credencial no válido' };
   }
 
-  const effectiveToken = token || OPERATOR_PLANT_CREDENTIALS[legajo];
-
-  if (!effectiveToken) {
+  if (!token) {
     return {
       success: false,
-      error: `Se detectó el legajo #${legajo}. Ingrese su contraseña en la pantalla de inicio de sesión.`,
+      error: 'Credencial QR incompleta',
     };
   }
 
   return await signInWithCredentials({
     identifier: `op_${legajo}@tpmplanta.com`,
-    password: effectiveToken,
+    password: token,
   });
 }
 
