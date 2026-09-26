@@ -12,6 +12,7 @@ export const Header: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
   const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const [isLogoHovered, setIsLogoHovered] = useState(false);
 
   useEffect(() => {
     async function loadAuth() {
@@ -42,16 +43,37 @@ export const Header: React.FC = () => {
     <header className="bg-[#0e1420]/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 px-3 sm:px-4 py-2.5 sticky top-0 z-40">
       <div className="max-w-6xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
         {/* Brand / Logo */}
-        <Link href="/" className="flex items-center gap-2 sm:gap-2.5 group shrink-0">
-          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:bg-amber-500 group-hover:text-slate-950 transition-colors shadow-xs">
-            <Truck size={17} className="sm:w-[19px] sm:h-[19px]" />
+        <Link
+          href="/"
+          className="flex items-center gap-2 sm:gap-2.5 group shrink-0"
+          onMouseEnter={() => setIsLogoHovered(true)}
+          onMouseLeave={() => setIsLogoHovered(false)}
+          onTouchStart={() => setIsLogoHovered(true)}
+          onTouchEnd={() => setIsLogoHovered(false)}
+          onTouchCancel={() => setIsLogoHovered(false)}
+        >
+          <div className="relative w-8 h-8 sm:w-9 sm:h-9 rounded-xl overflow-hidden flex items-center justify-center transition-all duration-200 shrink-0">
+            <img
+              src="/img/logocompacto.png"
+              alt="TPM Logo"
+              className={`w-full h-full object-contain transition-opacity duration-200 ${
+                isLogoHovered ? 'opacity-0' : 'opacity-100 group-hover:opacity-0 group-active:opacity-0'
+              }`}
+            />
+            <img
+              src="/img/logocompacto2.png"
+              alt="TPM Logo Hover"
+              className={`absolute inset-0 w-full h-full object-contain transition-opacity duration-200 ${
+                isLogoHovered ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-active:opacity-100'
+              }`}
+            />
           </div>
           <div className="leading-tight">
             <div className="font-black text-xs sm:text-base tracking-tight text-white flex items-center gap-1">
               TPM <span className="text-amber-400">ELEVADORES</span>
             </div>
             <div className="text-[8px] sm:text-[10px] text-slate-400 font-mono tracking-wider uppercase">
-              Checklist Planta • Nivel 1
+              Checklist Planta • C.G.R s.a
             </div>
           </div>
         </Link>

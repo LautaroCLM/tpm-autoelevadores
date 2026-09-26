@@ -14,3 +14,10 @@ tsconfig.tsbuildinfo
 .credenciales-rotadas.txt
 .credenciales*
 supabase/.temp
+
+# Android release keystore and signing secrets
+*.jks
+*.keystore
+android/keystore/
+key.properties
+android/key.properties
