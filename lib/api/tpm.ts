@@ -574,6 +574,7 @@ export async function createEquipo(equipoData: {
   qr_codigo: string;
   horometro_actual?: number;
   horometro_proximo_mantenimiento?: number | null;
+  intervalo_mantenimiento_horas?: number | null;
   estado?: 'operativo' | 'observado' | 'fuera_de_servicio';
 }): Promise<{ success: boolean; equipo?: Equipo; error?: string }> {
   if (!isSupabaseConfigured()) {
@@ -591,6 +592,7 @@ export async function createEquipo(equipoData: {
       qr_codigo: equipoData.qr_codigo.trim().toUpperCase(),
       horometro_actual: equipoData.horometro_actual || 0,
       horometro_proximo_mantenimiento: equipoData.horometro_proximo_mantenimiento || null,
+      intervalo_mantenimiento_horas: equipoData.intervalo_mantenimiento_horas ?? 250,
       estado: equipoData.estado || 'operativo',
     })
     .select('*')
@@ -613,14 +615,19 @@ export async function updateEquipo(
   }
 
   const supabase = createClient();
-  const { error } = await (supabase
+  const { data, error } = await (supabase
     .from('equipos') as any)
     .update(updates)
-    .eq('id', id);
+    .eq('id', id)
+    .select();
 
   if (error) {
     console.error('Error updating equipo in Supabase:', error);
     return { success: false, error: error.message };
+  }
+
+  if (!data || data.length === 0) {
+    return { success: false, error: 'No se pudo actualizar el equipo' };
   }
 
   return { success: true };
@@ -645,3 +652,38 @@ export async function deleteEquipo(id: string): Promise<{ success: boolean; erro
   return { success: true };
 }
 
+/**
+ * Registra que se ha realizado la intervención técnica de mantenimiento preventivo (service)
+ * y actualiza la meta del próximo service por el intervalo de horas especificado.
+ */
+export async function registrarServiceRealizado(
+  equipoId: string,
+  horometroActual: number,
+  intervaloHoras: number
+): Promise<{ success: boolean; nuevoProximoHorometro?: number; error?: string }> {
+  if (
+    typeof intervaloHoras !== 'number' ||
+    isNaN(intervaloHoras) ||
+    !isFinite(intervaloHoras) ||
+    intervaloHoras <= 0
+  ) {
+    return { success: false, error: 'Intervalo de mantenimiento inválido' };
+  }
+
+  const nuevoProximo = Number((horometroActual + intervaloHoras).toFixed(1));
+
+  if (!isSupabaseConfigured()) {
+    return { success: true, nuevoProximoHorometro: nuevoProximo };
+  }
+
+  const res = await updateEquipo(equipoId, {
+    horometro_proximo_mantenimiento: nuevoProximo,
+    intervalo_mantenimiento_horas: intervaloHoras,
+  });
+
+  if (!res.success) {
+    return { success: false, error: res.error };
+  }
+
+  return { success: true, nuevoProximoHorometro: nuevoProximo };
+}

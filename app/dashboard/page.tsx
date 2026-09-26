@@ -12,6 +12,7 @@ import {
   createEquipo,
   updateEquipo,
   deleteEquipo,
+  registrarServiceRealizado,
 } from '../../lib/api/tpm';
 import { getCurrentSessionAndProfile, signOutUser } from '../../lib/api/auth';
 import { Equipo, Inspeccion, Falla, Perfil } from '../../lib/types/tpm';
@@ -121,6 +122,8 @@ export default function SupervisorDashboardPage() {
   const [editEquipo, setEditEquipo] = useState<Equipo | null>(null);
   const [deleteConfirmEquipo, setDeleteConfirmEquipo] = useState<Equipo | null>(null);
   const [printQrEquipo, setPrintQrEquipo] = useState<Equipo | null>(null);
+  const [serviceModalEquipo, setServiceModalEquipo] = useState<Equipo | null>(null);
+  const [serviceIntervaloInput, setServiceIntervaloInput] = useState<string>('250');
 
   // Formulario nuevo equipo
   const [formInterno, setFormInterno] = useState('');
@@ -296,6 +299,50 @@ export default function SupervisorDashboardPage() {
       }
     } catch (err: any) {
       toast.error(err?.message || 'Error al eliminar');
+    } finally {
+      setSubmittingForm(false);
+    }
+  };
+
+  const handleRegistrarServiceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!serviceModalEquipo) return;
+
+    const intervaloNum = parseFloat(serviceIntervaloInput);
+    if (isNaN(intervaloNum) || intervaloNum <= 0) {
+      toast.error('Ingrese un intervalo de horas válido (ej: 250, 500)');
+      return;
+    }
+
+    setSubmittingForm(true);
+    try {
+      const res = await registrarServiceRealizado(
+        serviceModalEquipo.id,
+        serviceModalEquipo.horometro_actual,
+        intervaloNum
+      );
+
+      if (res.success && res.nuevoProximoHorometro) {
+        toast.success(
+          `¡Service registrado para Interno #${serviceModalEquipo.interno}! Próxima meta: ${res.nuevoProximoHorometro.toLocaleString('es-AR')} hs`
+        );
+        setEquipos((prev) =>
+          prev.map((eq) =>
+            eq.id === serviceModalEquipo.id
+              ? {
+                  ...eq,
+                  horometro_proximo_mantenimiento: res.nuevoProximoHorometro!,
+                  intervalo_mantenimiento_horas: intervaloNum,
+                }
+              : eq
+          )
+        );
+        setServiceModalEquipo(null);
+      } else {
+        toast.error(res.error || 'Error al registrar el service');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al registrar el service');
     } finally {
       setSubmittingForm(false);
     }
@@ -548,12 +595,27 @@ export default function SupervisorDashboardPage() {
                   </div>
 
                   {/* Actions bar */}
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/80">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setServiceModalEquipo(eq);
+                          setServiceIntervaloInput(
+                            (eq.intervalo_mantenimiento_horas || 250).toString()
+                          );
+                        }}
+                        className="btn-tactile px-2.5 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-amber-500/30 cursor-pointer"
+                        title="Registrar mantenimiento preventivo realizado"
+                      >
+                        <Wrench size={13} className="text-amber-400" />
+                        <span>Service</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => setPrintQrEquipo(eq)}
-                        className="btn-tactile px-3 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                        className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
                         title="Ver y Descargar Código QR"
                       >
                         <QrCode size={13} className="text-amber-400" />
@@ -563,7 +625,7 @@ export default function SupervisorDashboardPage() {
                       <button
                         type="button"
                         onClick={() => setEditEquipo(eq)}
-                        className="btn-tactile px-3 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                        className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
                         title="Editar datos técnicos"
                       >
                         <Edit2 size={13} className="text-slate-400" />
@@ -1150,6 +1212,122 @@ export default function SupervisorDashboardPage() {
           onClose={() => setPrintQrEquipo(null)}
           equipo={printQrEquipo}
         />
+      )}
+
+      {/* MODAL: REGISTRAR MANTENIMIENTO PREVENTIVO (SERVICE) REALIZADO */}
+      {serviceModalEquipo && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111724] border border-amber-500/40 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
+                  <Wrench size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-white">
+                    Registrar Service Realizado
+                  </h3>
+                  <p className="text-xs font-mono text-slate-400">
+                    Interno #{serviceModalEquipo.interno} ({serviceModalEquipo.marca})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setServiceModalEquipo(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleRegistrarServiceSubmit} className="space-y-4">
+              <div className="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-medium">Horómetro Actual en Tablero:</span>
+                  <strong className="font-mono font-tabular text-white text-sm">
+                    {serviceModalEquipo.horometro_actual.toFixed(1)} hs
+                  </strong>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400 font-medium">Próximo Service previo:</span>
+                  <span className="font-mono font-tabular text-amber-400 font-bold">
+                    {serviceModalEquipo.horometro_proximo_mantenimiento
+                      ? `${serviceModalEquipo.horometro_proximo_mantenimiento.toLocaleString('es-AR')} hs`
+                      : 'No programado'}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Intervalo de Mantenimiento (Horas)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="1"
+                    min="1"
+                    required
+                    value={serviceIntervaloInput}
+                    onChange={(e) => setServiceIntervaloInput(e.target.value)}
+                    className="w-full bg-[#0B0F17] border border-slate-700/80 focus:border-amber-500 rounded-xl px-4 py-3 text-base font-black text-white font-mono font-tabular focus:outline-none"
+                    placeholder="Ej: 250"
+                  />
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-amber-400">
+                    HORAS
+                  </span>
+                </div>
+                <div className="flex gap-2 mt-2">
+                  {[250, 500, 1000].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setServiceIntervaloInput(preset.toString())}
+                      className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold border transition cursor-pointer ${
+                        parseFloat(serviceIntervaloInput) === preset
+                          ? 'bg-amber-500 text-slate-950 border-amber-400'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      +{preset} hs
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preview de la nueva meta */}
+              <div className="bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl flex items-center justify-between text-xs">
+                <span className="text-emerald-300 font-medium">Nueva meta reprogramada:</span>
+                <strong className="font-mono font-tabular text-emerald-400 text-base font-black">
+                  {(
+                    serviceModalEquipo.horometro_actual +
+                    (parseFloat(serviceIntervaloInput) || 0)
+                  ).toFixed(1)}{' '}
+                  hs
+                </strong>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setServiceModalEquipo(null)}
+                  className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingForm}
+                  className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Wrench size={14} />
+                  <span>{submittingForm ? 'Guardando...' : 'Confirmar Service'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* Photo Modal Preview */}

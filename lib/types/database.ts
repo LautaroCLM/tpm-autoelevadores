@@ -42,6 +42,7 @@ export type Database = {
           qr_codigo: string;
           horometro_actual: number;
           horometro_proximo_mantenimiento: number | null;
+          intervalo_mantenimiento_horas: number | null;
           estado: 'operativo' | 'observado' | 'fuera_de_servicio';
           created_at: string;
         };
@@ -54,6 +55,7 @@ export type Database = {
           qr_codigo: string;
           horometro_actual?: number;
           horometro_proximo_mantenimiento?: number | null;
+          intervalo_mantenimiento_horas?: number | null;
           estado?: 'operativo' | 'observado' | 'fuera_de_servicio';
           created_at?: string;
         };
@@ -66,6 +68,7 @@ export type Database = {
           qr_codigo?: string;
           horometro_actual?: number;
           horometro_proximo_mantenimiento?: number | null;
+          intervalo_mantenimiento_horas?: number | null;
           estado?: 'operativo' | 'observado' | 'fuera_de_servicio';
           created_at?: string;
         };
