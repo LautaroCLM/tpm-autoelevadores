@@ -12,6 +12,7 @@ export const INITIAL_EQUIPOS: Equipo[] = [
     horometro_proximo_mantenimiento: 1500.0,
     intervalo_mantenimiento_horas: 250,
     estado: 'operativo',
+    deleted_at: null,
     created_at: new Date().toISOString(),
   },
   {
@@ -25,6 +26,7 @@ export const INITIAL_EQUIPOS: Equipo[] = [
     horometro_proximo_mantenimiento: 3500.0,
     intervalo_mantenimiento_horas: 250,
     estado: 'observado',
+    deleted_at: null,
     created_at: new Date().toISOString(),
   },
   {
@@ -38,6 +40,7 @@ export const INITIAL_EQUIPOS: Equipo[] = [
     horometro_proximo_mantenimiento: 1000.0,
     intervalo_mantenimiento_horas: 250,
     estado: 'operativo',
+    deleted_at: null,
     created_at: new Date().toISOString(),
   },
   {
@@ -51,6 +54,7 @@ export const INITIAL_EQUIPOS: Equipo[] = [
     horometro_proximo_mantenimiento: 4200.0,
     intervalo_mantenimiento_horas: 250,
     estado: 'fuera_de_servicio',
+    deleted_at: null,
     created_at: new Date().toISOString(),
   },
 ];

@@ -36,61 +36,69 @@ function isSupabaseConfigured(): boolean {
   return Boolean(url && key && !url.includes('placeholder') && !key.includes('placeholder'));
 }
 
-export async function fetchEquipos(): Promise<Equipo[]> {
+export async function fetchEquipos(incluirDadosDeBaja = false): Promise<Equipo[]> {
   const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
   if (isOffline) {
     const cached = await getCachedEquipos();
     if (cached && cached.length > 0) {
-      return cached;
+      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
     }
     const mock = await getMockEquipos();
-    return mock;
+    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
   }
 
   if (!isSupabaseConfigured()) {
     const mock = await getMockEquipos();
-    saveEquiposCache(mock).catch(() => {});
-    return mock;
+    saveEquiposCache(mock.filter((e) => !e.deleted_at)).catch(() => {});
+    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
   }
 
   try {
     const supabase = createClient();
-    const { data, error } = await supabase
+    let query = supabase
       .from('equipos')
       .select('*')
       .order('interno', { ascending: true });
 
+    if (!incluirDadosDeBaja) {
+      query = query.is('deleted_at', null);
+    }
+
+    const { data, error } = await query;
+
     if (error) {
       const cached = await getCachedEquipos().catch(() => []);
       if (cached && cached.length > 0) {
-        return cached;
+        return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
       }
-      return await getMockEquipos();
+      const mock = await getMockEquipos();
+      return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
     }
 
     const equipos = (data || []) as Equipo[];
     if (equipos.length > 0) {
-      saveEquiposCache(equipos).catch((e) =>
+      // Guardar en la caché local únicamente equipos activos para seguridad offline
+      const activos = equipos.filter((e) => !e.deleted_at);
+      saveEquiposCache(activos).catch((e) =>
         console.warn('No se pudo guardar la caché de equipos:', e)
       );
       return equipos;
     }
 
-    // Fallback: Si Supabase devuelve 0 equipos (por RLS anónimo o sincronización pendiente),
-    // recurrir a IndexedDB o mock para garantizar que la pantalla nunca quede en 0 equipos.
     const cached = await getCachedEquipos().catch(() => []);
     if (cached && cached.length > 0) {
-      return cached;
+      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
     }
     const mock = await getMockEquipos();
-    return mock;
+    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
   } catch (err: any) {
     const cached = await getCachedEquipos().catch(() => []);
     if (cached && cached.length > 0) {
-      return cached;
+      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
     }
-    return await getMockEquipos();
+    const mock = await getMockEquipos();
+    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
   }
 }
 
@@ -614,10 +622,13 @@ export async function updateEquipo(
     return { success: false, error: 'Supabase no está configurado' };
   }
 
+  // Desestructurar para prevenir modificación involuntaria de interno o qr_codigo
+  const { interno, qr_codigo, ...safeUpdates } = updates as any;
+
   const supabase = createClient();
   const { data, error } = await (supabase
     .from('equipos') as any)
-    .update(updates)
+    .update(safeUpdates)
     .eq('id', id)
     .select();
 
@@ -633,7 +644,7 @@ export async function updateEquipo(
   return { success: true };
 }
 
-export async function deleteEquipo(id: string): Promise<{ success: boolean; error?: string }> {
+export async function darDeBajaEquipo(id: string): Promise<{ success: boolean; error?: string }> {
   if (!isSupabaseConfigured()) {
     return { success: false, error: 'Supabase no está configurado' };
   }
@@ -641,15 +652,41 @@ export async function deleteEquipo(id: string): Promise<{ success: boolean; erro
   const supabase = createClient();
   const { error } = await (supabase
     .from('equipos') as any)
-    .delete()
+    .update({ deleted_at: new Date().toISOString() })
     .eq('id', id);
 
   if (error) {
-    console.error('Error deleting equipo from Supabase:', error);
+    console.error('Error al dar de baja equipo en Supabase:', error);
     return { success: false, error: error.message };
   }
 
   return { success: true };
+}
+
+export async function reactivarEquipo(id: string): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'Supabase no está configurado' };
+  }
+
+  const supabase = createClient();
+  const { error } = await (supabase
+    .from('equipos') as any)
+    .update({ deleted_at: null })
+    .eq('id', id);
+
+  if (error) {
+    console.error('Error al reactivar equipo en Supabase:', error);
+    return { success: false, error: error.message };
+  }
+
+  return { success: true };
+}
+
+/**
+ * Alias de compatibilidad: ejecuta baja lógica (Soft Delete) en lugar de DELETE físico.
+ */
+export async function deleteEquipo(id: string): Promise<{ success: boolean; error?: string }> {
+  return darDeBajaEquipo(id);
 }
 
 /**

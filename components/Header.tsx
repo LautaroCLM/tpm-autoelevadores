@@ -4,40 +4,21 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Truck, QrCode, LayoutDashboard, LogOut, User, ShieldCheck } from 'lucide-react';
-import { getCurrentSessionAndProfile, signOutUser } from '../lib/api/auth';
-import { Perfil } from '../lib/types/tpm';
+import { useAuth } from './AuthProvider';
 import { toast } from 'sonner';
 
 export const Header: React.FC = () => {
   const pathname = usePathname();
   const router = useRouter();
-  const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const { perfil, isSupervisorOrMaint, signOut: authSignOut } = useAuth();
   const [isLogoHovered, setIsLogoHovered] = useState(false);
 
-  useEffect(() => {
-    async function loadAuth() {
-      const { perfil: currentPerfil } = await getCurrentSessionAndProfile();
-      setPerfil(currentPerfil);
-    }
-    loadAuth();
-
-    const handleAuthChange = () => loadAuth();
-    window.addEventListener('tpm_auth_changed', handleAuthChange);
-    return () => window.removeEventListener('tpm_auth_changed', handleAuthChange);
-  }, []);
-
   const handleSignOut = async () => {
-    await signOutUser();
-    setPerfil(null);
+    await authSignOut();
     toast.info('Sesión cerrada');
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-    }
     router.replace('/');
     router.refresh();
   };
-
-  const isSupervisorOrMaint = perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento';
 
   return (
     <header className="bg-[#0e1420]/95 backdrop-blur-md border-b border-slate-800/80 text-slate-100 px-3 sm:px-4 py-2.5 sticky top-0 z-40">

@@ -132,3 +132,119 @@ button, input, select, textarea {
   background: #334155;
 }
 
+/* Estilos de Impresión para exactamente 1 sola hoja A4 */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 15mm;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Ocultar del layout de impresión absolutamente todos los elementos en body por defecto */
+  body > * {
+    display: none !important;
+  }
+
+  /* Mostrar únicamente el contenedor del modal inyectado por el portal */
+  body > .print-portal-container,
+  body > *:has(.print-qr-card) {
+    display: block !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transform: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Desactivar efectos y fondos oscuros en elementos hijos del modal durante impresión */
+  .print-portal-container * {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Ocultar elementos marcados como no imprimibles */
+  .print\:hidden, nav, header, footer {
+    display: none !important;
+  }
+
+  .print-modal-content {
+    display: block !important;
+    position: static !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    max-height: none !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+  }
+
+  .print-qr-wrapper {
+    display: block !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Tarjeta técnica adhesiva de impresión del QR centrada en A4 */
+  .print-qr-card {
+    display: block !important;
+    position: relative !important;
+    margin: 25mm auto 0 auto !important;
+    padding: 24px 28px !important;
+    width: 125mm !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: 3px solid #000000 !important;
+    border-radius: 16px !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    text-align: center !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .print-qr-card * {
+    color: #000000 !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  .print-qr-card img {
+    width: 210px !important;
+    height: 210px !important;
+    max-width: 210px !important;
+    max-height: 210px !important;
+    margin: 12px auto !important;
+    display: block !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

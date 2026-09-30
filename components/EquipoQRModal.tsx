@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import QRCode from 'qrcode';
 import { Equipo } from '../lib/types/tpm';
 import { StatusBadge } from './StatusBadge';
+import { formatQrCodigoDisplay } from '../lib/utils';
 import {
   X,
   QrCode,
@@ -15,6 +16,7 @@ import {
   Printer,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ModalPortal } from './ModalPortal';
 
 interface EquipoQRModalProps {
   isOpen: boolean;
@@ -133,26 +135,40 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
     }
   };
 
-  // Imprimir sticker adhesivo
+  // Imprimir sticker adhesivo con precarga verificada de la imagen QR
   const handlePrint = () => {
-    window.print();
+    if (generating || !qrDataUrl) {
+      toast.info('Generando código QR, por favor intente nuevamente en un instante...');
+      return;
+    }
+
+    // Garantizar que el bitmap Base64 esté completamente decodificado antes de abrir la vista previa de impresión
+    const img = new Image();
+    img.onload = () => {
+      window.print();
+    };
+    img.onerror = () => {
+      window.print();
+    };
+    img.src = qrDataUrl;
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-200"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="modal-qr-title"
-    >
+    <ModalPortal>
       <div
-        ref={modalRef}
-        onClick={(e) => e.stopPropagation()}
-        className="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm sm:max-w-md w-full p-5 sm:p-7 shadow-2xl space-y-5 text-center my-auto transition-all transform scale-100"
+        className="print-portal-container fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh animate-in fade-in duration-200 print:static print:bg-transparent print:p-0 print:m-0 print:overflow-visible print:block print:w-full print:h-auto print:min-h-0 print:max-h-none print:shadow-none print:border-none print:transform-none"
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modal-qr-title"
       >
+        <div
+          ref={modalRef}
+          onClick={(e) => e.stopPropagation()}
+          className="print-modal-content bg-slate-900 border border-slate-800 rounded-2xl sm:rounded-3xl max-w-sm sm:max-w-md w-full p-5 sm:p-7 shadow-2xl space-y-5 text-center my-auto max-h-[90dvh] overflow-y-auto transition-all transform scale-100 print:bg-transparent print:border-none print:shadow-none print:p-0 print:m-0 print:max-w-none print:space-y-0 print:block print:w-full print:h-auto print:min-h-0 print:max-h-none print:overflow-visible"
+        >
         {/* Cabecera del Modal */}
-        <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-4 text-left">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-4 text-left print:hidden">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-bold shadow-md shadow-amber-500/20 shrink-0">
               <QrCode size={22} />
@@ -165,7 +181,7 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
                 <StatusBadge estado={equipo.estado} size="sm" />
               </div>
               <p className="text-xs text-slate-400 font-medium">
-                {equipo.marca} {equipo.modelo} • Código: {equipo.qr_codigo}
+                {equipo.marca} {equipo.modelo} • Código: {formatQrCodigoDisplay(equipo.qr_codigo)}
               </p>
             </div>
           </div>
@@ -181,8 +197,8 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
         </div>
 
         {/* Contenedor del QR: Placa Técnica de Fábrica */}
-        <div className="flex flex-col items-center">
-          <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-slate-300 shadow-2xl inline-block max-w-[290px] sm:max-w-[320px] w-full text-slate-950">
+        <div className="print-qr-wrapper flex flex-col items-center print:block print:m-0 print:p-0">
+          <div className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-slate-300 shadow-2xl inline-block max-w-[290px] sm:max-w-[320px] w-full text-slate-950 print-qr-card">
             <div className="flex items-center justify-between border-b border-slate-200 pb-1.5 mb-2">
               <span className="text-[10px] font-black tracking-widest uppercase text-slate-500 font-mono">
                 TPM • PLANTA INDUSTRIAL
@@ -219,13 +235,13 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
             </div>
 
             <div className="font-mono text-xs font-bold tracking-widest text-slate-800 bg-slate-100 py-1.5 px-3 rounded-lg border border-slate-300 inline-block">
-              {equipo.qr_codigo}
+              {formatQrCodigoDisplay(equipo.qr_codigo)}
             </div>
           </div>
         </div>
 
         {/* Indicación de escaneo */}
-        <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 flex items-center gap-2.5 text-left text-xs text-amber-300">
+        <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3 flex items-center gap-2.5 text-left text-xs text-amber-300 print:hidden">
           <Camera size={18} className="shrink-0 text-amber-400" />
           <span className="leading-snug">
             Escaneá este código con la cámara del celular para acceder a la ficha e iniciar el checklist.
@@ -233,7 +249,7 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
         </div>
 
         {/* URL secundaria asociada al QR */}
-        <div className="space-y-1.5 text-left">
+        <div className="space-y-1.5 text-left print:hidden">
           <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-1">
             <span>URL de destino:</span>
             <button
@@ -260,7 +276,7 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
         </div>
 
         {/* Botones de acción */}
-        <div className="space-y-2 pt-1">
+        <div className="space-y-2 pt-1 print:hidden">
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -291,6 +307,7 @@ export function EquipoQRModal({ isOpen, onClose, equipo }: EquipoQRModalProps) {
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 

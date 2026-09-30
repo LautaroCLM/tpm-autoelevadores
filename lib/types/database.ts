@@ -44,6 +44,7 @@ export type Database = {
           horometro_proximo_mantenimiento: number | null;
           intervalo_mantenimiento_horas: number | null;
           estado: 'operativo' | 'observado' | 'fuera_de_servicio';
+          deleted_at: string | null;
           created_at: string;
         };
         Insert: {
@@ -57,6 +58,7 @@ export type Database = {
           horometro_proximo_mantenimiento?: number | null;
           intervalo_mantenimiento_horas?: number | null;
           estado?: 'operativo' | 'observado' | 'fuera_de_servicio';
+          deleted_at?: string | null;
           created_at?: string;
         };
         Update: {
@@ -70,6 +72,7 @@ export type Database = {
           horometro_proximo_mantenimiento?: number | null;
           intervalo_mantenimiento_horas?: number | null;
           estado?: 'operativo' | 'observado' | 'fuera_de_servicio';
+          deleted_at?: string | null;
           created_at?: string;
         };
       };

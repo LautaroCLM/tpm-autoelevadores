@@ -12,9 +12,12 @@ import {
   createEquipo,
   updateEquipo,
   deleteEquipo,
+  darDeBajaEquipo,
+  reactivarEquipo,
   registrarServiceRealizado,
 } from '../../lib/api/tpm';
-import { getCurrentSessionAndProfile, signOutUser } from '../../lib/api/auth';
+import { signOutUser } from '../../lib/api/auth';
+import { useAuth } from '../../components/AuthProvider';
 import { Equipo, Inspeccion, Falla, Perfil } from '../../lib/types/tpm';
 import { StatusBadge } from '../../components/StatusBadge';
 import { GravedadBadge } from '../../components/GravedadBadge';
@@ -25,8 +28,10 @@ const EquipoQRModal = dynamic(
   () => import('../../components/EquipoQRModal').then((mod) => mod.EquipoQRModal),
   { ssr: false }
 );
-import { formatDate } from '../../lib/utils';
+import { formatDate, formatQrCodigoDisplay } from '../../lib/utils';
+import { ModalPortal } from '../../components/ModalPortal';
 import { calcularEstadoMantenimiento } from '../../lib/utils/mantenimiento';
+import { ScrollReveal } from '../../components/ScrollReveal';
 import {
   LayoutDashboard,
   Truck,
@@ -107,13 +112,14 @@ function OperatorQRCard({ op }: { op: OperatorCardData }) {
 
 export default function SupervisorDashboardPage() {
   const router = useRouter();
-  const [perfil, setPerfil] = useState<Perfil | null>(null);
+  const { user, perfil, loading: authLoading, isSupervisorOrMaint } = useAuth();
   const [equipos, setEquipos] = useState<Equipo[]>([]);
   const [inspecciones, setInspecciones] = useState<Inspeccion[]>([]);
   const [fallas, setFallas] = useState<Falla[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState<'flota' | 'historial' | 'fallas' | 'operadores'>('flota');
+  const [flotaFilter, setFlotaFilter] = useState<'activos' | 'dados_de_baja' | 'todos'>('activos');
   const [fallaFilter, setFallaFilter] = useState<string>('todas');
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
 
@@ -139,22 +145,8 @@ export default function SupervisorDashboardPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const authInfo = await getCurrentSessionAndProfile();
-      if (!authInfo.user) {
-        router.replace('/login?redirect=/dashboard');
-        return;
-      }
-
-      if (authInfo.perfil?.rol !== 'supervisor' && authInfo.perfil?.rol !== 'mantenimiento') {
-        toast.error('Acceso denegado: esta sección es exclusiva para supervisores y mantenimiento');
-        router.replace('/');
-        return;
-      }
-
-      setPerfil(authInfo.perfil);
-
       const [eqs, insps, fls] = await Promise.all([
-        fetchEquipos(),
+        fetchEquipos(true), // Cargar activos y dados de baja para supervisores
         fetchInspecciones(),
         fetchFallas(),
       ]);
@@ -170,20 +162,36 @@ export default function SupervisorDashboardPage() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (authLoading) return;
 
-  // Stats calculation
-  const totalEquipos = equipos.length;
-  const operativos = equipos.filter((e) => e.estado === 'operativo').length;
-  const observados = equipos.filter((e) => e.estado === 'observado').length;
-  const fueraServicio = equipos.filter((e) => e.estado === 'fuera_de_servicio').length;
+    if (!user) {
+      router.replace('/login?redirect=/dashboard');
+      return;
+    }
+
+    if (!isSupervisorOrMaint) {
+      toast.error('Acceso denegado: esta sección es exclusiva para supervisores y mantenimiento');
+      router.replace('/');
+      return;
+    }
+
+    loadData();
+  }, [user, isSupervisorOrMaint, authLoading, router]);
+
+  // Stats calculation (basado en equipos activos)
+  const equiposActivos = equipos.filter((e) => !e.deleted_at);
+  const equiposDadosDeBaja = equipos.filter((e) => e.deleted_at != null);
+
+  const totalEquipos = equiposActivos.length;
+  const operativos = equiposActivos.filter((e) => e.estado === 'operativo').length;
+  const observados = equiposActivos.filter((e) => e.estado === 'observado').length;
+  const fueraServicio = equiposActivos.filter((e) => e.estado === 'fuera_de_servicio').length;
   const fallasPendientes = fallas.filter(
     (f) => f.estado_reparacion !== 'cerrado' && f.estado_reparacion !== 'reparado'
   ).length;
 
   // Estadísticas de mantenimiento preventivo por horómetro
-  const mantenimientoStats = equipos.map((e) =>
+  const mantenimientoStats = equiposActivos.map((e) =>
     calcularEstadoMantenimiento(e.horometro_actual, e.horometro_proximo_mantenimiento)
   );
   const mantenimientoVencidos = mantenimientoStats.filter((m) => m.nivel === 'vencido').length;
@@ -258,11 +266,9 @@ export default function SupervisorDashboardPage() {
     setSubmittingForm(true);
     try {
       const res = await updateEquipo(editEquipo.id, {
-        interno: editEquipo.interno,
         marca: editEquipo.marca,
         modelo: editEquipo.modelo,
         combustible: editEquipo.combustible,
-        qr_codigo: editEquipo.qr_codigo,
         horometro_actual: editEquipo.horometro_actual,
         horometro_proximo_mantenimiento: editEquipo.horometro_proximo_mantenimiento,
         estado: editEquipo.estado,
@@ -289,16 +295,40 @@ export default function SupervisorDashboardPage() {
 
     setSubmittingForm(true);
     try {
-      const res = await deleteEquipo(deleteConfirmEquipo.id);
+      const res = await darDeBajaEquipo(deleteConfirmEquipo.id);
       if (res.success) {
-        toast.success(`Autoelevador #${deleteConfirmEquipo.interno} eliminado del sistema`);
-        setEquipos((prev) => prev.filter((eq) => eq.id !== deleteConfirmEquipo.id));
+        toast.success(`Autoelevador #${deleteConfirmEquipo.interno} dado de baja (historial intacto)`);
+        const nowIso = new Date().toISOString();
+        setEquipos((prev) =>
+          prev.map((eq) =>
+            eq.id === deleteConfirmEquipo.id ? { ...eq, deleted_at: nowIso } : eq
+          )
+        );
         setDeleteConfirmEquipo(null);
       } else {
-        toast.error(res.error || 'Error al eliminar');
+        toast.error(res.error || 'Error al dar de baja');
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Error al eliminar');
+      toast.error(err?.message || 'Error al dar de baja');
+    } finally {
+      setSubmittingForm(false);
+    }
+  };
+
+  const handleReactivarEquipo = async (eq: Equipo) => {
+    setSubmittingForm(true);
+    try {
+      const res = await reactivarEquipo(eq.id);
+      if (res.success) {
+        toast.success(`¡Autoelevador #${eq.interno} reactivado exitosamente!`);
+        setEquipos((prev) =>
+          prev.map((item) => (item.id === eq.id ? { ...item, deleted_at: null } : item))
+        );
+      } else {
+        toast.error(res.error || 'Error al reactivar equipo');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al reactivar equipo');
     } finally {
       setSubmittingForm(false);
     }
@@ -357,301 +387,381 @@ export default function SupervisorDashboardPage() {
   return (
     <div className="max-w-6xl mx-auto px-3 sm:px-4 py-6 sm:py-8 w-full space-y-6 animate-fade-in">
       {/* Header Panel */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/40">
-        <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 text-amber-300 text-xs font-mono font-bold uppercase tracking-wider mb-2 border border-amber-500/40">
-            <ShieldCheck size={14} />
-            Consola Supervisor de Mantenimiento
+      <ScrollReveal direction="down" duration={350}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-6 shadow-xl shadow-black/40">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-950/80 text-amber-300 text-xs font-mono font-bold uppercase tracking-wider mb-2 border border-amber-500/40">
+              <ShieldCheck size={14} />
+              Consola Supervisor de Mantenimiento
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              Monitoreo y Gestión de Planta
+            </h1>
+            <p className="text-xs sm:text-sm font-mono text-slate-400 mt-1">
+              {perfil ? `Operador activo: ${perfil.nombre} [${perfil.rol.toUpperCase()}]` : 'Cargando sesión...'}
+            </p>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            Monitoreo y Gestión de Planta
-          </h1>
-          <p className="text-xs sm:text-sm font-mono text-slate-400 mt-1">
-            {perfil ? `Operador activo: ${perfil.nombre} [${perfil.rol.toUpperCase()}]` : 'Cargando sesión...'}
-          </p>
-        </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setCreateModalOpen(true)}
-            className="btn-tactile py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Agregar Equipo</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCreateModalOpen(true)}
+              className="btn-tactile py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
+            >
+              <Plus size={16} />
+              <span>Agregar Equipo</span>
+            </button>
 
-          <button
-            onClick={loadData}
-            disabled={loading}
-            className="btn-tactile py-2.5 px-3.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-xl transition flex items-center gap-2 border border-slate-700/80 cursor-pointer"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin text-amber-400' : 'text-slate-400'} />
-            <span className="hidden sm:inline">Actualizar</span>
-          </button>
+            <button
+              onClick={loadData}
+              disabled={loading}
+              className="btn-tactile py-2.5 px-3.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-xl transition flex items-center gap-2 border border-slate-700/80 cursor-pointer"
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin text-amber-400' : 'text-slate-400'} />
+              <span className="hidden sm:inline">Actualizar</span>
+            </button>
+          </div>
         </div>
-      </div>
+      </ScrollReveal>
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-4">
-        <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-3 sm:p-4 shadow-md card-hover">
-          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-            <Truck size={13} className="text-slate-500 shrink-0" /> Flota Total
-          </span>
-          <div className="text-2xl font-mono font-tabular font-black text-white mt-1.5">{totalEquipos}</div>
-          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Unidades registradas</span>
-        </div>
-
-        <div className="bg-[#111724] border border-emerald-500/30 bg-emerald-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
-          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-            <CheckCircle2 size={13} className="shrink-0" /> Operativos
-          </span>
-          <div className="text-2xl font-mono font-tabular font-black text-emerald-400 mt-1.5">{operativos}</div>
-          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Listos en línea</span>
-        </div>
-
-        <div className="bg-[#111724] border border-amber-500/30 bg-amber-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
-          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-            <AlertTriangle size={13} className="shrink-0" /> Observados
-          </span>
-          <div className="text-2xl font-mono font-tabular font-black text-amber-400 mt-1.5">{observados}</div>
-          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fallas leves / medias</span>
-        </div>
-
-        <div className="bg-[#111724] border border-rose-500/40 bg-rose-500/[0.05] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
-          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
-            <ShieldAlert size={13} className="shrink-0" /> Parados
-          </span>
-          <div className="text-2xl font-mono font-tabular font-black text-rose-400 mt-1.5">{fueraServicio}</div>
-          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fuera de servicio</span>
-        </div>
-
-        <div className="bg-[#111724] border border-orange-500/30 bg-orange-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover">
-          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
-            <AlertOctagon size={13} className="shrink-0" /> Fallas
-          </span>
-          <div className="text-2xl font-mono font-tabular font-black text-orange-400 mt-1.5">{fallasPendientes}</div>
-          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">En reparación</span>
-        </div>
-
-        <div className={`bg-[#111724] border rounded-2xl p-3 sm:p-4 shadow-md card-hover ${
-          mantenimientoVencidos > 0
-            ? 'border-rose-500/40 bg-rose-500/5'
-            : mantenimientoProximos > 0
-            ? 'border-amber-500/40 bg-amber-500/5'
-            : 'border-slate-800/90'
-        }`}>
-          <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-            <Wrench size={13} className="shrink-0" /> Service hs
-          </span>
-          <div className="flex items-baseline gap-1.5 mt-1.5">
-            <span className={`text-2xl font-mono font-tabular font-black ${mantenimientoVencidos > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
-              {mantenimientoVencidos}
+        <ScrollReveal delay={0} distance={12}>
+          <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Truck size={13} className="text-slate-500 shrink-0" /> Flota Total
             </span>
-            <span className="text-[10px] font-mono text-slate-400 font-semibold">venc.</span>
-            <span className="text-slate-600">/</span>
-            <span className={`text-xl font-mono font-tabular font-bold ${mantenimientoProximos > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
-              {mantenimientoProximos}
-            </span>
-            <span className="text-[10px] font-mono text-slate-400 font-semibold">próx.</span>
+            <div className="text-2xl font-mono font-tabular font-black text-white mt-1.5">{totalEquipos}</div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Unidades registradas</span>
           </div>
-          <span className="text-[10px] sm:text-[11px] font-mono text-slate-500 block mt-0.5">
-            {mantenimientoAlDia} al día ({totalEquipos} tot.)
-          </span>
-        </div>
+        </ScrollReveal>
+
+        <ScrollReveal delay={40} distance={12}>
+          <div className="bg-[#111724] border border-emerald-500/30 bg-emerald-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle2 size={13} className="shrink-0" /> Operativos
+            </span>
+            <div className="text-2xl font-mono font-tabular font-black text-emerald-400 mt-1.5">{operativos}</div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Listos en línea</span>
+          </div>
+        </ScrollReveal>
+
+        <ScrollReveal delay={80} distance={12}>
+          <div className="bg-[#111724] border border-amber-500/30 bg-amber-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+              <AlertTriangle size={13} className="shrink-0" /> Observados
+            </span>
+            <div className="text-2xl font-mono font-tabular font-black text-amber-400 mt-1.5">{observados}</div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fallas leves / medias</span>
+          </div>
+        </ScrollReveal>
+
+        <ScrollReveal delay={120} distance={12}>
+          <div className="bg-[#111724] border border-rose-500/40 bg-rose-500/[0.05] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+              <ShieldAlert size={13} className="shrink-0" /> Parados
+            </span>
+            <div className="text-2xl font-mono font-tabular font-black text-rose-400 mt-1.5">{fueraServicio}</div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fuera de servicio</span>
+          </div>
+        </ScrollReveal>
+
+        <ScrollReveal delay={160} distance={12}>
+          <div className="bg-[#111724] border border-orange-500/30 bg-orange-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+              <AlertOctagon size={13} className="shrink-0" /> Fallas
+            </span>
+            <div className="text-2xl font-mono font-tabular font-black text-orange-400 mt-1.5">{fallasPendientes}</div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">En reparación</span>
+          </div>
+        </ScrollReveal>
+
+        <ScrollReveal delay={200} distance={12}>
+          <div className={`bg-[#111724] border rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full ${
+            mantenimientoVencidos > 0
+              ? 'border-rose-500/40 bg-rose-500/5'
+              : mantenimientoProximos > 0
+              ? 'border-amber-500/40 bg-amber-500/5'
+              : 'border-slate-800/90'
+          }`}>
+            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+              <Wrench size={13} className="shrink-0" /> Service hs
+            </span>
+            <div className="flex items-baseline gap-1.5 mt-1.5">
+              <span className={`text-2xl font-mono font-tabular font-black ${mantenimientoVencidos > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+                {mantenimientoVencidos}
+              </span>
+              <span className="text-[10px] font-mono text-slate-400 font-semibold">venc.</span>
+              <span className="text-slate-600">/</span>
+              <span className={`text-xl font-mono font-tabular font-bold ${mantenimientoProximos > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                {mantenimientoProximos}
+              </span>
+              <span className="text-[10px] font-mono text-slate-400 font-semibold">próx.</span>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500 block mt-0.5">
+              {mantenimientoAlDia} al día ({totalEquipos} tot.)
+            </span>
+          </div>
+        </ScrollReveal>
       </div>
 
       {/* Tabs Navigation */}
-      <div className="flex border-b border-slate-800 gap-2 sm:gap-4 overflow-x-auto scrollbar-none -webkit-overflow-scrolling-touch">
-        <button
-          onClick={() => setActiveTab('flota')}
-          className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'flota'
-              ? 'border-amber-500 text-amber-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <Truck size={16} />
-          <span>Flota ({equipos.length})</span>
-        </button>
+      <ScrollReveal delay={150}>
+        <div className="flex border-b border-slate-800 gap-2 sm:gap-4 overflow-x-auto scrollbar-none -webkit-overflow-scrolling-touch">
+          <button
+            onClick={() => setActiveTab('flota')}
+            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+              activeTab === 'flota'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Truck size={16} />
+            <span>Flota ({equipos.length})</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('fallas')}
-          className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'fallas'
-              ? 'border-amber-500 text-amber-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <AlertOctagon size={16} />
-          <span>Fallas ({fallas.length})</span>
-          {fallasPendientes > 0 && (
-            <span className="px-1.5 py-0.5 bg-rose-950/90 text-rose-200 border border-rose-500/70 rounded text-[10px] font-mono font-bold">
-              {fallasPendientes}
-            </span>
-          )}
-        </button>
+          <button
+            onClick={() => setActiveTab('fallas')}
+            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+              activeTab === 'fallas'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <AlertOctagon size={16} />
+            <span>Fallas ({fallas.length})</span>
+            {fallasPendientes > 0 && (
+              <span className="px-1.5 py-0.5 bg-rose-950/90 text-rose-200 border border-rose-500/70 rounded text-[10px] font-mono font-bold">
+                {fallasPendientes}
+              </span>
+            )}
+          </button>
 
-        <button
-          onClick={() => setActiveTab('historial')}
-          className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'historial'
-              ? 'border-amber-500 text-amber-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <ClipboardList size={16} />
-          <span>Historial TPM ({inspecciones.length})</span>
-        </button>
+          <button
+            onClick={() => setActiveTab('historial')}
+            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+              activeTab === 'historial'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ClipboardList size={16} />
+            <span>Historial TPM ({inspecciones.length})</span>
+          </button>
 
-        <button
-          onClick={() => setActiveTab('operadores')}
-          className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
-            activeTab === 'operadores'
-              ? 'border-amber-500 text-amber-400'
-              : 'border-transparent text-slate-400 hover:text-slate-200'
-          }`}
-        >
-          <QrCode size={16} />
-          <span>Credenciales QR</span>
-        </button>
-      </div>
+          <button
+            onClick={() => setActiveTab('operadores')}
+            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+              activeTab === 'operadores'
+                ? 'border-amber-500 text-amber-400'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <QrCode size={16} />
+            <span>Credenciales QR</span>
+          </button>
+        </div>
+      </ScrollReveal>
 
       {/* TAB 1: FLOTA Y GESTIÓN DE EQUIPOS */}
       {activeTab === 'flota' && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xs sm:text-sm font-mono font-bold uppercase tracking-wider text-slate-400">
-              Listado de Autoelevadores en Planta
-            </h2>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+              <span className="text-xs font-mono font-bold text-slate-400 flex items-center gap-1.5 mr-1">
+                <Filter size={13} className="text-amber-500" /> Filtrar:
+              </span>
+              {[
+                { id: 'activos', label: `Activos (${equiposActivos.length})` },
+                { id: 'dados_de_baja', label: `Dados de Baja (${equiposDadosDeBaja.length})` },
+                { id: 'todos', label: `Todos (${equipos.length})` },
+              ].map((fil) => (
+                <button
+                  key={fil.id}
+                  onClick={() => setFlotaFilter(fil.id as any)}
+                  className={`btn-tactile px-3 py-1.5 rounded text-xs font-mono font-bold transition cursor-pointer border ${
+                    flotaFilter === fil.id
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'bg-[#111724] text-slate-400 border-slate-800/90 hover:border-slate-700'
+                  }`}
+                >
+                  {fil.label}
+                </button>
+              ))}
+            </div>
+
             <button
               onClick={() => setCreateModalOpen(true)}
-              className="text-xs font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1.5 cursor-pointer"
+              className="text-xs font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1.5 cursor-pointer shrink-0"
             >
               <Plus size={14} /> Registrar Nuevo
             </button>
           </div>
 
-          {equipos.length === 0 ? (
+          {equipos.filter((eq) => {
+            if (flotaFilter === 'activos') return !eq.deleted_at;
+            if (flotaFilter === 'dados_de_baja') return eq.deleted_at != null;
+            return true;
+          }).length === 0 ? (
             <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-10 text-center space-y-3">
               <Truck size={40} className="text-slate-600 mx-auto" />
-              <p className="font-bold text-white text-base">No hay autoelevadores registrados</p>
+              <p className="font-bold text-white text-base">No se encontraron autoelevadores</p>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                Registrá el primer equipo de la planta con su número de interno y código QR.
+                {flotaFilter === 'dados_de_baja'
+                  ? 'No hay equipos dados de baja en el sistema.'
+                  : 'Registrá el primer equipo de la planta con su número de interno y código QR.'}
               </p>
-              <button
-                onClick={() => setCreateModalOpen(true)}
-                className="btn-tactile px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition cursor-pointer"
-              >
-                + Registrar Primer Autoelevador
-              </button>
+              {flotaFilter === 'activos' && (
+                <button
+                  onClick={() => setCreateModalOpen(true)}
+                  className="btn-tactile px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl transition cursor-pointer"
+                >
+                  + Registrar Primer Autoelevador
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {equipos.map((eq) => (
-                <div
-                  key={eq.id}
-                  className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/90 rounded-2xl p-4 sm:p-5 shadow-lg shadow-black/40 space-y-4 transition card-hover"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-12 h-12 rounded-xl bg-[#0B0F17] border border-slate-700/80 flex items-center justify-center text-amber-400 font-mono font-black text-xl shadow-inner shrink-0">
-                        {eq.interno}
-                      </div>
-                      <div className="min-w-0 truncate">
-                        <div className="text-xs font-mono text-amber-400 font-semibold tracking-wider">
-                          QR: {eq.qr_codigo}
-                        </div>
-                        <h3 className="font-bold text-base text-white truncate">
-                          Interno #{eq.interno} — {eq.marca}
-                        </h3>
-                        <p className="text-xs text-slate-400 font-mono truncate">{eq.modelo}</p>
-                      </div>
-                    </div>
-                    <StatusBadge estado={eq.estado} size="sm" />
-                  </div>
-
-                  <div className="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2.5 text-xs">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <span className="text-slate-500 font-mono text-[11px] uppercase tracking-wider block">Horómetro</span>
-                        <p className="font-mono font-tabular font-bold text-white text-sm mt-0.5">{eq.horometro_actual.toFixed(1)} hs</p>
-                      </div>
-                      <div>
-                        <span className="text-slate-500 font-mono text-[11px] uppercase tracking-wider block">Combustible</span>
-                        <p className="font-mono font-bold text-white text-sm mt-0.5">{eq.combustible || 'N/A'}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/70">
-                      <span className="text-slate-400 text-[11px] font-mono flex items-center gap-1.5">
-                        <Wrench size={12} className="text-amber-400/80" />
-                        <span>Próximo Service:</span>
-                      </span>
-                      <MantenimientoBadge
-                        horometroActual={eq.horometro_actual}
-                        proximoMantenimiento={eq.horometro_proximo_mantenimiento}
-                        size="xs"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Actions bar */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
-                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setServiceModalEquipo(eq);
-                          setServiceIntervaloInput(
-                            (eq.intervalo_mantenimiento_horas || 250).toString()
-                          );
-                        }}
-                        className="btn-tactile px-2.5 py-1.5 bg-amber-950/60 hover:bg-amber-950/90 text-amber-400 font-mono font-bold text-xs rounded transition flex items-center gap-1.5 border border-amber-500/40 cursor-pointer"
-                        title="Registrar mantenimiento preventivo realizado"
-                      >
-                        <Wrench size={13} className="text-amber-400" />
-                        <span>Service</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setPrintQrEquipo(eq)}
-                        className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
-                        title="Ver y Descargar Código QR"
-                      >
-                        <QrCode size={13} className="text-amber-400" />
-                        <span>Placa QR</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setEditEquipo(eq)}
-                        className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
-                        title="Editar datos técnicos"
-                      >
-                        <Edit2 size={13} className="text-slate-400" />
-                        <span>Editar</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirmEquipo(eq)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition cursor-pointer"
-                        title="Dar de baja equipo"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-
-                    <Link
-                      href={`/equipo/${eq.qr_codigo}`}
-                      className="text-xs font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+              {equipos
+                .filter((eq) => {
+                  if (flotaFilter === 'activos') return !eq.deleted_at;
+                  if (flotaFilter === 'dados_de_baja') return eq.deleted_at != null;
+                  return true;
+                })
+                .map((eq, idx) => (
+                  <ScrollReveal key={eq.id} delay={idx * 40} distance={12}>
+                    <div
+                      className={`bg-[#111724] border rounded-2xl p-4 sm:p-5 shadow-lg shadow-black/40 space-y-4 transition card-hover h-full ${
+                        eq.deleted_at
+                          ? 'border-rose-900/50 bg-rose-950/10 opacity-80'
+                          : 'border-slate-800/90 hover:border-slate-700/90'
+                      }`}
                     >
-                      <span>Ficha Técnica</span>
-                      <ExternalLink size={12} />
-                    </Link>
-                  </div>
-                </div>
-              ))}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-12 h-12 rounded-xl bg-[#0B0F17] border flex items-center justify-center font-mono font-black text-xl shadow-inner shrink-0 ${
+                            eq.deleted_at ? 'border-rose-900/80 text-rose-400' : 'border-slate-700/80 text-amber-400'
+                          }`}>
+                            {eq.interno}
+                          </div>
+                          <div className="min-w-0 truncate">
+                            <div className="text-xs font-mono text-amber-400 font-semibold tracking-wider">
+                              QR: {formatQrCodigoDisplay(eq.qr_codigo)}
+                            </div>
+                            <h3 className="font-bold text-base text-white truncate">
+                              Interno #{eq.interno} — {eq.marca}
+                            </h3>
+                            <p className="text-xs text-slate-400 font-mono truncate">{eq.modelo}</p>
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          <StatusBadge estado={eq.estado} size="sm" />
+                          {eq.deleted_at && (
+                            <span className="px-2 py-0.5 bg-rose-950 text-rose-300 border border-rose-600 rounded text-[10px] font-mono font-bold uppercase tracking-wider">
+                              Dado de Baja
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800/80 space-y-2.5 text-xs">
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <span className="text-slate-500 font-mono text-[11px] uppercase tracking-wider block">Horómetro</span>
+                            <p className="font-mono font-tabular font-bold text-white text-sm mt-0.5">{eq.horometro_actual.toFixed(1)} hs</p>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 font-mono text-[11px] uppercase tracking-wider block">Combustible</span>
+                            <p className="font-mono font-bold text-white text-sm mt-0.5">{eq.combustible || 'N/A'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between pt-2 border-t border-slate-800/70">
+                          <span className="text-slate-400 text-[11px] font-mono flex items-center gap-1.5">
+                            <Wrench size={12} className="text-amber-400/80" />
+                            <span>Próximo Service:</span>
+                          </span>
+                          <MantenimientoBadge
+                            horometroActual={eq.horometro_actual}
+                            proximoMantenimiento={eq.horometro_proximo_mantenimiento}
+                            size="xs"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Actions bar */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                          {!eq.deleted_at && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setServiceModalEquipo(eq);
+                                setServiceIntervaloInput(
+                                  (eq.intervalo_mantenimiento_horas || 250).toString()
+                                );
+                              }}
+                              className="btn-tactile px-2.5 py-1.5 bg-amber-950/60 hover:bg-amber-950/90 text-amber-400 font-mono font-bold text-xs rounded transition flex items-center gap-1.5 border border-amber-500/40 cursor-pointer"
+                              title="Registrar mantenimiento preventivo realizado"
+                            >
+                              <Wrench size={13} className="text-amber-400" />
+                              <span>Service</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setPrintQrEquipo(eq)}
+                            className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                            title="Ver y Descargar Código QR"
+                          >
+                            <QrCode size={13} className="text-amber-400" />
+                            <span>Placa QR</span>
+                          </button>
+
+                          {!eq.deleted_at && (
+                            <button
+                              type="button"
+                              onClick={() => setEditEquipo(eq)}
+                              className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                              title="Editar datos técnicos"
+                            >
+                              <Edit2 size={13} className="text-slate-400" />
+                              <span>Editar</span>
+                            </button>
+                          )}
+
+                          {eq.deleted_at ? (
+                            <button
+                              type="button"
+                              onClick={() => handleReactivarEquipo(eq)}
+                              className="btn-tactile px-2.5 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-emerald-500/50 cursor-pointer"
+                              title="Reactivar equipo dado de baja"
+                            >
+                              <RefreshCw size={13} className="text-emerald-400" />
+                              <span>Reactivar</span>
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmEquipo(eq)}
+                              className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                              title="Dar de baja equipo (Soft Delete)"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+
+                        <Link
+                          href={`/equipo/${eq.qr_codigo}`}
+                          className="text-xs font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                        >
+                          <span>Ficha Técnica</span>
+                          <ExternalLink size={12} />
+                        </Link>
+                      </div>
+                    </div>
+                  </ScrollReveal>
+                ))}
             </div>
           )}
         </div>
@@ -695,83 +805,82 @@ export default function SupervisorDashboardPage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3">
-              {filteredFallas.map((falla) => {
+              {filteredFallas.map((falla, idx) => {
                 const eqMatch = equipos.find((e) => e.id === falla.equipo_id);
                 return (
-                  <div
-                    key={falla.id}
-                    className="bg-[#111724] border border-slate-800/90 rounded-2xl p-5 shadow-lg shadow-black/40 space-y-3"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                      <div className="flex items-center gap-2.5">
-                        <GravedadBadge gravedad={falla.gravedad} size="sm" />
-                        <span className="font-bold text-sm text-white">
-                          Autoelevador Interno #{eqMatch?.interno || 'N/A'} ({eqMatch?.marca})
-                        </span>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                        <Clock size={12} className="text-slate-500" />
-                        <span>Detectado: {formatDate(falla.created_at)}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-start gap-4">
-                      {falla.foto_url && (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedPhoto(falla.foto_url)}
-                          className="w-24 h-20 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 relative shrink-0 group cursor-pointer"
-                        >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={falla.foto_url}
-                            alt="Foto defecto"
-                            className="w-full h-full object-cover group-hover:scale-105 transition"
-                          />
-                          <span className="absolute bottom-1 right-1 bg-black/80 font-mono text-[9px] text-white px-1.5 py-0.5 rounded">
-                            Ver
+                  <ScrollReveal key={falla.id} delay={idx * 40} distance={12}>
+                    <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-5 shadow-lg shadow-black/40 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <GravedadBadge gravedad={falla.gravedad} size="sm" />
+                          <span className="font-bold text-sm text-white">
+                            Autoelevador Interno #{eqMatch?.interno || 'N/A'} ({eqMatch?.marca})
                           </span>
-                        </button>
-                      )}
+                        </div>
 
-                      <div className="flex-1 space-y-1">
-                        <p className="text-sm text-slate-200 font-medium leading-relaxed">
-                          {falla.descripcion || 'Sin descripción técnica registrada.'}
-                        </p>
+                        <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                          <Clock size={12} className="text-slate-500" />
+                          <span>Detectado: {formatDate(falla.created_at)}</span>
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Status Changer */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80 bg-[#0B0F17] -mx-5 -mb-5 p-3.5 rounded-b-2xl">
-                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
-                        Estado de Reparación:
-                      </span>
-
-                      <div className="flex flex-wrap gap-1.5">
-                        {(
-                          ['pendiente', 'en_revision', 'reparando', 'reparado', 'cerrado'] as Falla['estado_reparacion'][]
-                        ).map((st) => (
+                      <div className="flex flex-col sm:flex-row items-start gap-4">
+                        {falla.foto_url && (
                           <button
-                            key={st}
                             type="button"
-                            onClick={() => handleUpdateFallaStatus(falla.id, st)}
-                            className={`btn-tactile px-2.5 py-1 rounded text-xs font-mono font-bold transition capitalize cursor-pointer border ${
-                              falla.estado_reparacion === st
-                                ? st === 'cerrado' || st === 'reparado'
-                                  ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                                  : st === 'reparando'
-                                  ? 'bg-amber-500 text-slate-950 border-amber-400'
-                                  : 'bg-rose-600 text-white border-rose-500'
-                                : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
-                            }`}
+                            onClick={() => setSelectedPhoto(falla.foto_url)}
+                            className="w-24 h-20 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 relative shrink-0 group cursor-pointer"
                           >
-                            {st.replace('_', ' ')}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={falla.foto_url}
+                              alt="Foto defecto"
+                              className="w-full h-full object-cover group-hover:scale-105 transition"
+                            />
+                            <span className="absolute bottom-1 right-1 bg-black/80 font-mono text-[9px] text-white px-1.5 py-0.5 rounded">
+                              Ver
+                            </span>
                           </button>
-                        ))}
+                        )}
+
+                        <div className="flex-1 space-y-1">
+                          <p className="text-sm text-slate-200 font-medium leading-relaxed">
+                            {falla.descripcion || 'Sin descripción técnica registrada.'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Status Changer */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80 bg-[#0B0F17] -mx-5 -mb-5 p-3.5 rounded-b-2xl">
+                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+                          Estado de Reparación:
+                        </span>
+
+                        <div className="flex flex-wrap gap-1.5">
+                          {(
+                            ['pendiente', 'en_revision', 'reparando', 'reparado', 'cerrado'] as Falla['estado_reparacion'][]
+                          ).map((st) => (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => handleUpdateFallaStatus(falla.id, st)}
+                              className={`btn-tactile px-2.5 py-1 rounded text-xs font-mono font-bold transition capitalize cursor-pointer border ${
+                                falla.estado_reparacion === st
+                                  ? st === 'cerrado' || st === 'reparado'
+                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                    : st === 'reparando'
+                                    ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                    : 'bg-rose-600 text-white border-rose-500'
+                                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
+                              }`}
+                            >
+                              {st.replace('_', ' ')}
+                            </button>
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  </ScrollReveal>
                 );
               })}
             </div>
@@ -789,40 +898,39 @@ export default function SupervisorDashboardPage() {
               <p className="text-xs font-mono text-slate-500 mt-1">Las inspecciones completadas por los operadores aparecerán aquí.</p>
             </div>
           ) : (
-            inspecciones.map((insp) => {
+            inspecciones.map((insp, idx) => {
               const eq = equipos.find((e) => e.id === insp.equipo_id);
               return (
-                <div
-                  key={insp.id}
-                  className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/80 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md transition"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-[#0B0F17] border border-slate-700/80 flex items-center justify-center text-amber-400 font-mono font-black">
-                      {eq?.interno || '—'}
-                    </div>
-                    <div>
-                      <div className="font-bold text-sm text-white flex items-center gap-2">
-                        Interno #{eq?.interno} — {eq?.marca}
+                <ScrollReveal key={insp.id} delay={idx * 40} distance={12}>
+                  <div className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/80 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md transition">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-[#0B0F17] border border-slate-700/80 flex items-center justify-center text-amber-400 font-mono font-black">
+                        {eq?.interno || '—'}
                       </div>
-                      <div className="text-xs font-mono text-slate-400 flex items-center gap-2 mt-0.5">
-                        <User size={12} className="text-slate-500" />
-                        <span>Operador: {insp.operador_id.slice(0, 8)}</span>
-                        <span className="text-slate-600">•</span>
-                        <Gauge size={12} className="text-slate-500" />
-                        <span className="font-tabular text-slate-200">{insp.horometro} hs</span>
+                      <div>
+                        <div className="font-bold text-sm text-white flex items-center gap-2">
+                          Interno #{eq?.interno} — {eq?.marca}
+                        </div>
+                        <div className="text-xs font-mono text-slate-400 flex items-center gap-2 mt-0.5">
+                          <User size={12} className="text-slate-500" />
+                          <span>Operador: {insp.operador_id.slice(0, 8)}</span>
+                          <span className="text-slate-600">•</span>
+                          <Gauge size={12} className="text-slate-500" />
+                          <span className="font-tabular text-slate-200">{insp.horometro} hs</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
-                    <span className="text-xs font-mono text-slate-400">
-                      {formatDate(insp.finalizado_en || insp.iniciado_en)}
-                    </span>
-                    {insp.estado_resultante && (
-                      <StatusBadge estado={insp.estado_resultante} size="sm" />
-                    )}
+                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-800/80">
+                      <span className="text-xs font-mono text-slate-400">
+                        {formatDate(insp.finalizado_en || insp.iniciado_en)}
+                      </span>
+                      {insp.estado_resultante && (
+                        <StatusBadge estado={insp.estado_resultante} size="sm" />
+                      )}
+                    </div>
                   </div>
-                </div>
+                </ScrollReveal>
               );
             })
           )}
@@ -872,8 +980,10 @@ export default function SupervisorDashboardPage() {
                   codigoQR: 'TPM:OP:3082',
                   rol: 'Operador Turno Noche',
                 },
-              ].map((op) => (
-                <OperatorQRCard key={op.legajo} op={op} />
+              ].map((op, idx) => (
+                <ScrollReveal key={op.legajo} delay={idx * 60}>
+                  <OperatorQRCard op={op} />
+                </ScrollReveal>
               ))}
             </div>
           </div>
@@ -882,331 +992,356 @@ export default function SupervisorDashboardPage() {
 
       {/* MODAL 1: REGISTRAR NUEVO EQUIPO */}
       {createModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111724] border border-slate-800/90 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-              <h3 className="text-lg font-black text-white flex items-center gap-2">
-                <Truck size={20} className="text-amber-400" />
-                Registrar Nuevo Autoelevador
-              </h3>
-              <button
-                onClick={() => setCreateModalOpen(false)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateEquipoSubmit} className="space-y-3.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    N° Interno *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formInterno}
-                    onChange={(e) => {
-                      setFormInterno(e.target.value);
-                      if (!formQR) setFormQR(`AE-${e.target.value.padStart(2, '0')}`);
-                    }}
-                    placeholder="Ej: 05"
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-bold focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Código QR
-                  </label>
-                  <input
-                    type="text"
-                    value={formQR}
-                    onChange={(e) => setFormQR(e.target.value)}
-                    placeholder="Ej: AE-05"
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-amber-400 font-mono font-bold focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Marca
-                  </label>
-                  <input
-                    type="text"
-                    value={formMarca}
-                    onChange={(e) => setFormMarca(e.target.value)}
-                    placeholder="Toyota, Hyster, Crown..."
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Modelo
-                  </label>
-                  <input
-                    type="text"
-                    value={formModelo}
-                    onChange={(e) => setFormModelo(e.target.value)}
-                    placeholder="8FG25 (2.5 ton)"
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Combustible
-                  </label>
-                  <select
-                    value={formCombustible}
-                    onChange={(e) => setFormCombustible(e.target.value)}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
-                  >
-                    <option value="GLP">GLP / Gas</option>
-                    <option value="Diesel">Diesel</option>
-                    <option value="Electrico">Eléctrico</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Estado Inicial
-                  </label>
-                  <select
-                    value={formEstado}
-                    onChange={(e) => setFormEstado(e.target.value as any)}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-bold"
-                  >
-                    <option value="operativo">Operativo</option>
-                    <option value="observado">Observado</option>
-                    <option value="fuera_de_servicio">Fuera de Servicio</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Horómetro Actual
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    inputMode="decimal"
-                    value={formHorometro}
-                    onChange={(e) => setFormHorometro(e.target.value)}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Próximo Service (hs)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    inputMode="decimal"
-                    value={formProximoService}
-                    onChange={(e) => setFormProximoService(e.target.value)}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-3 border-t border-slate-800">
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-slate-800/90 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <Truck size={20} className="text-amber-400" />
+                  Registrar Nuevo Autoelevador
+                </h3>
                 <button
-                  type="button"
                   onClick={() => setCreateModalOpen(false)}
-                  className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingForm}
-                  className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
-                >
-                  {submittingForm ? 'Guardando...' : 'Guardar Autoelevador'}
+                  <X size={18} />
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleCreateEquipoSubmit} className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      N° Interno *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={formInterno}
+                      onChange={(e) => {
+                        setFormInterno(e.target.value);
+                        if (!formQR) setFormQR(`AE-${e.target.value.padStart(2, '0')}`);
+                      }}
+                      placeholder="Ej: 05"
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-bold focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Código QR
+                    </label>
+                    <input
+                      type="text"
+                      value={formQR}
+                      onChange={(e) => setFormQR(e.target.value)}
+                      placeholder="Ej: AE-05"
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-amber-400 font-mono font-bold focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Marca
+                    </label>
+                    <input
+                      type="text"
+                      value={formMarca}
+                      onChange={(e) => setFormMarca(e.target.value)}
+                      placeholder="Toyota, Hyster, Crown..."
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Modelo
+                    </label>
+                    <input
+                      type="text"
+                      value={formModelo}
+                      onChange={(e) => setFormModelo(e.target.value)}
+                      placeholder="8FG25 (2.5 ton)"
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Combustible
+                    </label>
+                    <select
+                      value={formCombustible}
+                      onChange={(e) => setFormCombustible(e.target.value)}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
+                    >
+                      <option value="GLP">GLP / Gas</option>
+                      <option value="Diesel">Diesel</option>
+                      <option value="Electrico">Eléctrico</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Estado Inicial
+                    </label>
+                    <select
+                      value={formEstado}
+                      onChange={(e) => setFormEstado(e.target.value as any)}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-bold"
+                    >
+                      <option value="operativo">Operativo</option>
+                      <option value="observado">Observado</option>
+                      <option value="fuera_de_servicio">Fuera de Servicio</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Horómetro Actual
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={formHorometro}
+                      onChange={(e) => setFormHorometro(e.target.value)}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Próximo Service (hs)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={formProximoService}
+                      onChange={(e) => setFormProximoService(e.target.value)}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setCreateModalOpen(false)}
+                    className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingForm}
+                    className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
+                  >
+                    {submittingForm ? 'Guardando...' : 'Guardar Autoelevador'}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* MODAL 2: EDITAR EQUIPO */}
       {editEquipo && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111724] border border-slate-800/90 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-              <h3 className="text-lg font-black text-white flex items-center gap-2">
-                <Edit2 size={18} className="text-amber-400" />
-                Editar Autoelevador #{editEquipo.interno}
-              </h3>
-              <button
-                onClick={() => setEditEquipo(null)}
-                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
-              >
-                <X size={18} />
-              </button>
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-slate-800/90 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <h3 className="text-lg font-black text-white flex items-center gap-2">
+                  <Edit2 size={18} className="text-amber-400" />
+                  Editar Autoelevador #{editEquipo.interno}
+                </h3>
+                <button
+                  onClick={() => setEditEquipo(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleEditEquipoSubmit} className="space-y-3.5">
+                <div className="grid grid-cols-2 gap-3 bg-[#0B0F17] p-3 rounded-xl border border-slate-800/80">
+                  <div>
+                    <span className="block text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                      N° Interno (Inmutable)
+                    </span>
+                    <span className="text-sm font-mono font-black text-amber-400">
+                      #{editEquipo.interno}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-mono font-bold text-slate-500 uppercase tracking-wider">
+                      Código QR (Inmutable)
+                    </span>
+                    <span className="text-sm font-mono font-black text-amber-400">
+                      {formatQrCodigoDisplay(editEquipo.qr_codigo)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Marca
+                    </label>
+                    <input
+                      type="text"
+                      value={editEquipo.marca || ''}
+                      onChange={(e) => setEditEquipo({ ...editEquipo, marca: e.target.value })}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Modelo
+                    </label>
+                    <input
+                      type="text"
+                      value={editEquipo.modelo || ''}
+                      onChange={(e) => setEditEquipo({ ...editEquipo, modelo: e.target.value })}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Combustible
+                    </label>
+                    <select
+                      value={editEquipo.combustible || 'GLP'}
+                      onChange={(e) => setEditEquipo({ ...editEquipo, combustible: e.target.value })}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
+                    >
+                      <option value="GLP">GLP / Gas</option>
+                      <option value="Diesel">Diesel</option>
+                      <option value="Electrico">Eléctrico</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Estado Operativo
+                    </label>
+                    <select
+                      value={editEquipo.estado}
+                      onChange={(e) => setEditEquipo({ ...editEquipo, estado: e.target.value as any })}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-bold focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="operativo">Operativo</option>
+                      <option value="observado">Observado</option>
+                      <option value="fuera_de_servicio">Fuera de Servicio</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Horómetro Actual
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={editEquipo.horometro_actual}
+                      onChange={(e) =>
+                        setEditEquipo({ ...editEquipo, horometro_actual: parseFloat(e.target.value) || 0 })
+                      }
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
+                      Próximo Service (hs)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      inputMode="decimal"
+                      value={editEquipo.horometro_proximo_mantenimiento || ''}
+                      onChange={(e) =>
+                        setEditEquipo({
+                          ...editEquipo,
+                          horometro_proximo_mantenimiento: parseFloat(e.target.value) || null,
+                        })
+                      }
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setEditEquipo(null)}
+                    className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingForm}
+                    className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
+                  >
+                    {submittingForm ? 'Guardando...' : 'Actualizar Equipo'}
+                  </button>
+                </div>
+              </form>
             </div>
+          </div>
+        </ModalPortal>
+      )}
 
-            <form onSubmit={handleEditEquipoSubmit} className="space-y-3.5">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Marca
-                  </label>
-                  <input
-                    type="text"
-                    value={editEquipo.marca || ''}
-                    onChange={(e) => setEditEquipo({ ...editEquipo, marca: e.target.value })}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Modelo
-                  </label>
-                  <input
-                    type="text"
-                    value={editEquipo.modelo || ''}
-                    onChange={(e) => setEditEquipo({ ...editEquipo, modelo: e.target.value })}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
+      {/* MODAL 3: CONFIRMAR BAJA LÓGICA (SOFT DELETE) */}
+      {deleteConfirmEquipo && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-rose-500/40 rounded-2xl max-w-sm w-full p-5 sm:p-6 shadow-2xl space-y-4 text-center my-auto max-h-[90dvh] overflow-y-auto">
+              <div className="w-12 h-12 rounded-xl bg-rose-500/20 text-rose-400 mx-auto flex items-center justify-center border border-rose-500/40">
+                <Trash2 size={24} />
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Combustible
-                  </label>
-                  <select
-                    value={editEquipo.combustible || 'GLP'}
-                    onChange={(e) => setEditEquipo({ ...editEquipo, combustible: e.target.value })}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white focus:border-amber-500 focus:outline-none font-medium"
-                  >
-                    <option value="GLP">GLP / Gas</option>
-                    <option value="Diesel">Diesel</option>
-                    <option value="Electrico">Eléctrico</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Estado Operativo
-                  </label>
-                  <select
-                    value={editEquipo.estado}
-                    onChange={(e) => setEditEquipo({ ...editEquipo, estado: e.target.value as any })}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-bold focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="operativo">Operativo</option>
-                    <option value="observado">Observado</option>
-                    <option value="fuera_de_servicio">Fuera de Servicio</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Horómetro Actual
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    inputMode="decimal"
-                    value={editEquipo.horometro_actual}
-                    onChange={(e) =>
-                      setEditEquipo({ ...editEquipo, horometro_actual: parseFloat(e.target.value) || 0 })
-                    }
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1">
-                    Próximo Service (hs)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    inputMode="decimal"
-                    value={editEquipo.horometro_proximo_mantenimiento || ''}
-                    onChange={(e) =>
-                      setEditEquipo({
-                        ...editEquipo,
-                        horometro_proximo_mantenimiento: parseFloat(e.target.value) || null,
-                      })
-                    }
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-3 border-t border-slate-800">
+              <h3 className="text-lg font-black text-white">
+                ¿Dar de baja Interno #{deleteConfirmEquipo.interno}?
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                Esta acción aplicará una <strong>baja lógica (Soft Delete)</strong>. El autoelevador dejará de estar operativo para los inspectores, pero todo su <strong>historial de inspecciones, fallas y mantenimiento se conservará 100% intacto</strong>.
+              </p>
+              <div className="flex gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setEditEquipo(null)}
-                  className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                  onClick={() => setDeleteConfirmEquipo(null)}
+                  className="btn-tactile flex-1 py-2.5 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleDeleteEquipo}
                   disabled={submittingForm}
-                  className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
+                  className="btn-tactile flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-600/30 active:scale-[0.98] cursor-pointer"
                 >
-                  {submittingForm ? 'Guardando...' : 'Actualizar Equipo'}
+                  {submittingForm ? 'Procesando...' : 'Dar de Baja'}
                 </button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 3: CONFIRMAR ELIMINACIÓN */}
-      {deleteConfirmEquipo && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111724] border border-rose-500/40 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4 text-center">
-            <div className="w-12 h-12 rounded-xl bg-rose-500/20 text-rose-400 mx-auto flex items-center justify-center border border-rose-500/40">
-              <Trash2 size={24} />
-            </div>
-            <h3 className="text-lg font-black text-white">
-              ¿Dar de baja Interno #{deleteConfirmEquipo.interno}?
-            </h3>
-            <p className="text-xs font-mono text-slate-400">
-              Esta acción eliminará el equipo y su historial asociado en la base de datos.
-            </p>
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmEquipo(null)}
-                className="btn-tactile flex-1 py-2.5 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteEquipo}
-                disabled={submittingForm}
-                className="btn-tactile flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-600/30 active:scale-[0.98] cursor-pointer"
-              >
-                {submittingForm ? 'Eliminando...' : 'Sí, Eliminar'}
-              </button>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* MODAL 4: VER / DESCARGAR / IMPRIMIR QR DE EQUIPO */}
@@ -1220,136 +1355,140 @@ export default function SupervisorDashboardPage() {
 
       {/* MODAL: REGISTRAR MANTENIMIENTO PREVENTIVO (SERVICE) REALIZADO */}
       {serviceModalEquipo && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111724] border border-amber-500/40 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
-                  <Wrench size={20} />
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-amber-500/40 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center font-bold border border-amber-500/30">
+                    <Wrench size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">
+                      Registrar Service Realizado
+                    </h3>
+                    <p className="text-xs font-mono text-slate-400">
+                      Interno #{serviceModalEquipo.interno} ({serviceModalEquipo.marca})
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-white">
-                    Registrar Service Realizado
-                  </h3>
-                  <p className="text-xs font-mono text-slate-400">
-                    Interno #{serviceModalEquipo.interno} ({serviceModalEquipo.marca})
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setServiceModalEquipo(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleRegistrarServiceSubmit} className="space-y-4">
-              <div className="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Horómetro Actual en Tablero:</span>
-                  <strong className="font-mono font-tabular text-white text-sm">
-                    {serviceModalEquipo.horometro_actual.toFixed(1)} hs
-                  </strong>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Próximo Service previo:</span>
-                  <span className="font-mono font-tabular text-amber-400 font-bold">
-                    {serviceModalEquipo.horometro_proximo_mantenimiento
-                      ? `${serviceModalEquipo.horometro_proximo_mantenimiento.toLocaleString('es-AR')} hs`
-                      : 'No programado'}
-                  </span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                  Intervalo de Mantenimiento (Horas)
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="1"
-                    min="1"
-                    inputMode="decimal"
-                    required
-                    value={serviceIntervaloInput}
-                    onChange={(e) => setServiceIntervaloInput(e.target.value)}
-                    className="w-full bg-[#0B0F17] border border-slate-700/80 focus:border-amber-500 rounded-xl px-4 py-3 text-base font-black text-white font-mono font-tabular focus:outline-none"
-                    placeholder="Ej: 250"
-                  />
-                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-amber-400">
-                    HORAS
-                  </span>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  {[250, 500, 1000].map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setServiceIntervaloInput(preset.toString())}
-                      className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold border transition cursor-pointer ${
-                        parseFloat(serviceIntervaloInput) === preset
-                          ? 'bg-amber-500 text-slate-950 border-amber-400'
-                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
-                      }`}
-                    >
-                      +{preset} hs
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Preview de la nueva meta */}
-              <div className="bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl flex items-center justify-between text-xs">
-                <span className="text-emerald-300 font-medium">Nueva meta reprogramada:</span>
-                <strong className="font-mono font-tabular text-emerald-400 text-base font-black">
-                  {(
-                    serviceModalEquipo.horometro_actual +
-                    (parseFloat(serviceIntervaloInput) || 0)
-                  ).toFixed(1)}{' '}
-                  hs
-                </strong>
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setServiceModalEquipo(null)}
-                  className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
                 >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingForm}
-                  className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Wrench size={14} />
-                  <span>{submittingForm ? 'Guardando...' : 'Confirmar Service'}</span>
+                  <X size={18} />
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleRegistrarServiceSubmit} className="space-y-4">
+                <div className="bg-[#0B0F17] p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-medium">Horómetro Actual en Tablero:</span>
+                    <strong className="font-mono font-tabular text-white text-sm">
+                      {serviceModalEquipo.horometro_actual.toFixed(1)} hs
+                    </strong>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-medium">Próximo Service previo:</span>
+                    <span className="font-mono font-tabular text-amber-400 font-bold">
+                      {serviceModalEquipo.horometro_proximo_mantenimiento
+                        ? `${serviceModalEquipo.horometro_proximo_mantenimiento.toLocaleString('es-AR')} hs`
+                        : 'No programado'}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                    Intervalo de Mantenimiento (Horas)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      inputMode="decimal"
+                      required
+                      value={serviceIntervaloInput}
+                      onChange={(e) => setServiceIntervaloInput(e.target.value)}
+                      className="w-full bg-[#0B0F17] border border-slate-700/80 focus:border-amber-500 rounded-xl px-4 py-3 text-base font-black text-white font-mono font-tabular focus:outline-none"
+                      placeholder="Ej: 250"
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-amber-400">
+                      HORAS
+                    </span>
+                  </div>
+                  <div className="flex gap-2 mt-2">
+                    {[250, 500, 1000].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setServiceIntervaloInput(preset.toString())}
+                        className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold border transition cursor-pointer ${
+                          parseFloat(serviceIntervaloInput) === preset
+                            ? 'bg-amber-500 text-slate-950 border-amber-400'
+                            : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                        }`}
+                      >
+                        +{preset} hs
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preview de la nueva meta */}
+                <div className="bg-emerald-950/30 border border-emerald-500/30 p-3 rounded-xl flex items-center justify-between text-xs">
+                  <span className="text-emerald-300 font-medium">Nueva meta reprogramada:</span>
+                  <strong className="font-mono font-tabular text-emerald-400 text-base font-black">
+                    {(
+                      serviceModalEquipo.horometro_actual +
+                      (parseFloat(serviceIntervaloInput) || 0)
+                    ).toFixed(1)}{' '}
+                    hs
+                  </strong>
+                </div>
+
+                <div className="flex gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setServiceModalEquipo(null)}
+                    className="btn-tactile flex-1 py-3 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingForm}
+                    className="btn-tactile flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Wrench size={14} />
+                    <span>{submittingForm ? 'Guardando...' : 'Confirmar Service'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* Photo Modal Preview */}
       {selectedPhoto && (
-        <div
-          onClick={() => setSelectedPhoto(null)}
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 cursor-pointer"
-        >
-          <div className="max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={selectedPhoto}
-              alt="Detalle falla ampliada"
-              className="max-h-[80vh] w-auto object-contain rounded-xl"
-            />
+        <ModalPortal>
+          <div
+            onClick={() => setSelectedPhoto(null)}
+            className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 cursor-pointer overflow-y-auto w-screen h-dvh min-h-dvh"
+          >
+            <div className="max-w-2xl max-h-[85dvh] overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 p-2 my-auto">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={selectedPhoto}
+                alt="Detalle falla ampliada"
+                className="max-h-[80dvh] w-auto object-contain rounded-xl"
+              />
+            </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

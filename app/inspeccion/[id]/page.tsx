@@ -9,7 +9,7 @@ import {
   submitInspeccion,
   isNetworkError,
 } from '../../../lib/api/tpm';
-import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
+import { useAuth } from '../../../components/AuthProvider';
 import { createClient } from '../../../lib/supabase/client';
 import {
   Equipo,
@@ -28,6 +28,8 @@ const FallaModal = dynamic(
   () => import('../../../components/FallaModal').then((mod) => mod.FallaModal),
   { ssr: false }
 );
+import { ModalPortal } from '../../../components/ModalPortal';
+import { ScrollReveal } from '../../../components/ScrollReveal';
 import {
   ArrowLeft,
   Check,
@@ -52,6 +54,7 @@ export default function InspeccionChecklistPage() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { user, perfil, loading: authLoading } = useAuth();
 
   const equipoId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const horometroParam = searchParams.get('horometro');
@@ -111,43 +114,19 @@ export default function InspeccionChecklistPage() {
 
   useEffect(() => {
     async function initData() {
-      if (!equipoId) return;
+      if (!equipoId || authLoading) return;
       setLoading(true);
       try {
-        // 1. Validar sesión activa del operario distinguiendo online u offline
-        let authUser = null;
-        let authPerfil = null;
-        const isOffline = typeof window !== 'undefined' && !navigator.onLine;
-
-        if (isOffline) {
-          const supabase = createClient();
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            authUser = session.user;
-            authPerfil = {
-              id: session.user.id,
-              nombre: session.user.user_metadata?.nombre || 'Operador',
-              legajo: session.user.user_metadata?.legajo || null,
-              rol: session.user.user_metadata?.rol || 'operador',
-              created_at: session.user.created_at || new Date().toISOString(),
-            };
-          }
-        } else {
-          const authInfo = await getCurrentSessionAndProfile();
-          authUser = authInfo.user;
-          authPerfil = authInfo.perfil;
-        }
-
-        if (!authUser) {
+        if (!user) {
           toast.error('Debe iniciar sesión para realizar la inspección');
           const currentUrl = window.location.pathname + window.location.search;
           router.replace(`/login?redirect=${encodeURIComponent(currentUrl)}`);
           return;
         }
 
-        if (authPerfil) {
+        if (perfil) {
           setOperadorNombre(
-            authPerfil.nombre + (authPerfil.legajo ? ` (#${authPerfil.legajo})` : '')
+            perfil.nombre + (perfil.legajo ? ` (#${perfil.legajo})` : '')
           );
         }
 
@@ -190,7 +169,7 @@ export default function InspeccionChecklistPage() {
       }, 1500);
       return () => clearTimeout(timer);
     }
-  }, [equipoId, router]);
+  }, [equipoId, user, perfil, authLoading, router]);
 
   // Agrupamiento de ítems por sección
   const sections = useMemo(() => {
@@ -338,29 +317,12 @@ export default function InspeccionChecklistPage() {
       return;
     }
 
-    // Obtener identidad real del operador distinguiendo estado online u offline
-    let finalOperadorId = '';
-    const isOffline = typeof window !== 'undefined' && !navigator.onLine;
-
-    if (isOffline) {
-      // Modo offline: validar sesión local persistida sin realizar llamadas de red a Supabase Auth
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user?.id) {
-        toast.error('No se detectó una sesión activa en este dispositivo. Inicie sesión cuando disponga de conexión.');
-        return;
-      }
-      finalOperadorId = session.user.id;
-    } else {
-      // Modo online: validación completa con verificación en el servidor y política de sesión diaria
-      const authInfo = await getCurrentSessionAndProfile();
-      if (!authInfo.user) {
-        toast.error('Sesión no válida o caducada. Por favor inicie sesión nuevamente.');
-        const currentUrl = window.location.pathname + window.location.search;
-        router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
-        return;
-      }
-      finalOperadorId = authInfo.user.id;
+    let finalOperadorId = user?.id || '';
+    if (!finalOperadorId) {
+      toast.error('Sesión no válida o caducada. Por favor inicie sesión nuevamente.');
+      const currentUrl = window.location.pathname + window.location.search;
+      router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
+      return;
     }
 
     // Construir respuestas completas para TODOS los ítems de la plantilla activa
@@ -394,8 +356,8 @@ export default function InspeccionChecklistPage() {
     setIsSubmitting(true);
 
     try {
-      // Si el navegador reporta explícitamente estar offline, encolar en IndexedDB y evitar RPC remoto
-      if (isOffline || (typeof window !== 'undefined' && !navigator.onLine)) {
+      const isOffline = typeof window !== 'undefined' && !navigator.onLine;
+      if (isOffline) {
         await enqueueInspeccion(payload);
         toast.info('Sin conexión: la inspección se guardó en este dispositivo y se sincronizará automáticamente al reconectar.');
         setCompletedResult({
@@ -682,15 +644,15 @@ export default function InspeccionChecklistPage() {
           </span>
         </div>
 
-        {currentSection.items.map((item) => {
+        {currentSection.items.map((item, idx) => {
           const resp = responses[item.id];
           const isOk = resp?.valor_bool === true;
           const isFalla = resp?.es_falla === true;
 
           return (
-            <div
-              key={item.id}
-              className={`bg-[#111724] border rounded-2xl p-4 sm:p-5 transition shadow-xs space-y-3 ${
+            <ScrollReveal key={item.id} delay={idx * 30} distance={10}>
+              <div
+                className={`bg-[#111724] border rounded-2xl p-4 sm:p-5 transition shadow-xs space-y-3 ${
                 isFalla
                   ? 'border-rose-500/70 bg-rose-950/20'
                   : isOk
@@ -839,7 +801,8 @@ export default function InspeccionChecklistPage() {
                   />
                 </div>
               )}
-            </div>
+              </div>
+            </ScrollReveal>
           );
         })}
       </div>
@@ -900,43 +863,45 @@ export default function InspeccionChecklistPage() {
 
       {/* Modal de Confirmación al Intentar Salir con Respuestas Cargadas */}
       {leaveModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111724] border border-slate-800 rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl animate-fade-in">
-            <div className="flex items-center gap-3 text-amber-400">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
-                <AlertTriangle size={20} />
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-slate-800 rounded-2xl max-w-md w-full p-5 sm:p-6 space-y-4 shadow-2xl animate-fade-in my-auto max-h-[90dvh] overflow-y-auto">
+              <div className="flex items-center gap-3 text-amber-400">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <AlertTriangle size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-white">¿Abandonar Inspección?</h3>
+                  <p className="text-xs text-slate-400">Tenés {answeredCount} respuesta(s) cargada(s) sin enviar.</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base sm:text-lg font-black text-white">¿Abandonar Inspección?</h3>
-                <p className="text-xs text-slate-400">Tenés {answeredCount} respuesta(s) cargada(s) sin enviar.</p>
+
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
+                Si salís ahora, se perderán todas las respuestas ingresadas en esta inspección de turno.
+              </p>
+
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setLeaveModalOpen(false)}
+                  className="flex-1 min-h-[44px] py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition cursor-pointer btn-tactile shadow-xs"
+                >
+                  Continuar Inspección
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLeaveModalOpen(false);
+                    router.push(`/equipo/${equipo.qr_codigo}`);
+                  }}
+                  className="flex-1 min-h-[44px] py-2.5 px-4 bg-slate-900 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-750 hover:border-rose-500/50 font-bold text-xs sm:text-sm rounded-xl transition cursor-pointer btn-tactile"
+                >
+                  Abandonar y Descartar
+                </button>
               </div>
-            </div>
-
-            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-              Si salís ahora, se perderán todas las respuestas ingresadas en esta inspección de turno.
-            </p>
-
-            <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setLeaveModalOpen(false)}
-                className="flex-1 min-h-[44px] py-2.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition cursor-pointer btn-tactile shadow-xs"
-              >
-                Continuar Inspección
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLeaveModalOpen(false);
-                  router.push(`/equipo/${equipo.qr_codigo}`);
-                }}
-                className="flex-1 min-h-[44px] py-2.5 px-4 bg-slate-900 hover:bg-rose-950/60 text-slate-300 hover:text-rose-300 border border-slate-750 hover:border-rose-500/50 font-bold text-xs sm:text-sm rounded-xl transition cursor-pointer btn-tactile"
-              >
-                Abandonar y Descartar
-              </button>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

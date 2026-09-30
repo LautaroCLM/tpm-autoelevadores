@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Camera, X, RefreshCw, Sparkles, UserCheck, Truck, AlertCircle } from 'lucide-react';
+import { ModalPortal } from './ModalPortal';
 
 interface QRScannerModalProps {
   isOpen: boolean;
@@ -23,6 +24,17 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [manualInput, setManualInput] = useState('');
   const [scanning, setScanning] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = 'unset';
+    }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [isOpen]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -109,14 +121,15 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200"
-      onClick={onClose}
-    >
+    <ModalPortal>
       <div
-        onClick={(e) => e.stopPropagation()}
-        className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl space-y-0 relative my-auto animate-in fade-in zoom-in-95 duration-200"
+        className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh animate-in fade-in duration-200"
+        onClick={onClose}
       >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full overflow-hidden shadow-2xl space-y-0 relative my-auto max-h-[90dvh] flex flex-col animate-in fade-in zoom-in-95 duration-200"
+        >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-850">
           <div className="flex items-center gap-2">
@@ -209,6 +222,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 };
 

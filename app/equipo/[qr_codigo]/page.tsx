@@ -4,8 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { fetchEquipoByQR, fetchInspeccionesByEquipo } from '../../../lib/api/tpm';
-import { getCurrentSessionAndProfile } from '../../../lib/api/auth';
-import { createClient } from '../../../lib/supabase/client';
+import { useAuth } from '../../../components/AuthProvider';
 import { Equipo, Perfil, InspeccionConDetalle } from '../../../lib/types/tpm';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { MantenimientoBadge } from '../../../components/MantenimientoBadge';
@@ -15,7 +14,8 @@ const EquipoQRModal = dynamic(
   () => import('../../../components/EquipoQRModal').then((mod) => mod.EquipoQRModal),
   { ssr: false }
 );
-import { formatDate } from '../../../lib/utils';
+import { formatDate, formatQrCodigoDisplay } from '../../../lib/utils';
+import { ModalPortal } from '../../../components/ModalPortal';
 import { extractEquipoCode } from '../../../lib/utils/auth-helpers';
 import {
   ArrowLeft,
@@ -33,10 +33,12 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { calcularEstadoMantenimiento } from '../../../lib/utils/mantenimiento';
+import { ScrollReveal } from '../../../components/ScrollReveal';
 
 export default function EquipoFichaPage() {
   const params = useParams();
   const router = useRouter();
+  const { user, perfil, loading: authLoading } = useAuth();
   const rawParam = Array.isArray(params?.qr_codigo) ? params.qr_codigo[0] : (params?.qr_codigo as string);
   const qrCodigo = extractEquipoCode(rawParam);
 
@@ -52,40 +54,17 @@ export default function EquipoFichaPage() {
 
   useEffect(() => {
     async function init() {
-      if (!qrCodigo) return;
+      if (!qrCodigo || authLoading) return;
       setLoading(true);
       try {
-        const isOffline = typeof window !== 'undefined' && !navigator.onLine;
-        let currentUser = null;
-        let currentPerfil = null;
-
-        if (isOffline) {
-          const supabase = createClient();
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user) {
-            currentUser = session.user;
-            currentPerfil = {
-              id: session.user.id,
-              nombre: session.user.user_metadata?.nombre || 'Operador',
-              legajo: session.user.user_metadata?.legajo || null,
-              rol: session.user.user_metadata?.rol || 'operador',
-              created_at: session.user.created_at || new Date().toISOString(),
-            };
-          }
-        } else {
-          const authInfo = await getCurrentSessionAndProfile();
-          currentUser = authInfo.user;
-          currentPerfil = authInfo.perfil;
-        }
-
-        if (!currentUser) {
+        if (!user) {
           // No autenticado: preservar destino y redirigir a /login
           const targetPath = `/equipo/${encodeURIComponent(qrCodigo)}`;
           router.replace(`/login?redirect=${encodeURIComponent(targetPath)}`);
           return;
         }
 
-        setOperador(currentPerfil);
+        setOperador(perfil);
 
         try {
           const eqData = await fetchEquipoByQR(qrCodigo);
@@ -93,6 +72,7 @@ export default function EquipoFichaPage() {
             setEquipo(eqData);
             setHorometro(eqData.horometro_actual.toString());
 
+            const isOffline = typeof window !== 'undefined' && !navigator.onLine;
             // Cargar historial de inspecciones solo si hay conexión
             if (!isOffline) {
               try {
@@ -119,7 +99,7 @@ export default function EquipoFichaPage() {
       }
     }
     init();
-  }, [qrCodigo, router]);
+  }, [qrCodigo, user, perfil, authLoading, router]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -230,254 +210,290 @@ export default function EquipoFichaPage() {
       </div>
 
       {/* PLACA TÉCNICA DIGITAL DEL AUTOELEVADOR (Estructura Sobria de Maquinaria) */}
-      <div className="bg-[#0e1420] border border-slate-800 rounded-lg overflow-hidden space-y-0">
+      <ScrollReveal direction="up" distance={16}>
+        <div className="bg-[#0e1420] border border-slate-800 rounded-lg overflow-hidden space-y-0">
 
-        {/* Cabecera Principal de Identificación */}
-        <div className="p-4 sm:p-5 bg-[#0b0f17] border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          {/* Cabecera Principal de Identificación */}
+          <div className="p-4 sm:p-5 bg-[#0b0f17] border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
 
-          {/* Identificador Físico & Especificación */}
-          <div className="flex items-start gap-3.5">
-            <div className="px-3 py-2 bg-slate-950 border border-slate-800 rounded text-center shrink-0">
-              <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500 block">
-                INTERNO
-              </span>
-              <span className="text-2xl sm:text-3xl font-mono font-black text-amber-400 leading-none">
-                {equipo.interno.padStart(2, '0')}
-              </span>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                  QR: {equipo.qr_codigo}
+            {/* Identificador Físico & Especificación */}
+            <div className="flex items-start gap-3.5">
+              <div className="px-3 py-2 bg-slate-950 border border-slate-800 rounded text-center shrink-0">
+                <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-500 block">
+                  INTERNO
                 </span>
-                <span className="text-xs font-mono text-slate-400">
-                  Combustible: <strong className="text-slate-200">{equipo.combustible || 'GLP'}</strong>
+                <span className="text-2xl sm:text-3xl font-mono font-black text-amber-400 leading-none">
+                  {equipo.interno.padStart(2, '0')}
                 </span>
               </div>
 
-              <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight leading-snug">
-                {equipo.marca} {equipo.modelo}
-              </h1>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-mono font-bold text-amber-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                    QR: {formatQrCodigoDisplay(equipo.qr_codigo)}
+                  </span>
+                  <span className="text-xs font-mono text-slate-400">
+                    Combustible: <strong className="text-slate-200">{equipo.combustible || 'GLP'}</strong>
+                  </span>
+                </div>
+
+                <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight leading-snug">
+                  {equipo.marca} {equipo.modelo}
+                </h1>
+              </div>
             </div>
-          </div>
 
-          {/* Estado Operativo & Acción QR */}
-          <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
-            <button
-              type="button"
-              onClick={() => setShowQrModal(true)}
-              className="px-3 py-1.5 bg-slate-950 hover:bg-slate-900 text-slate-300 font-mono font-bold text-xs rounded border border-slate-800 hover:border-slate-700 transition flex items-center gap-1.5 cursor-pointer"
-              title="Ver y descargar placa QR oficial"
-            >
-              <QrCode size={14} className="text-amber-400" />
-              <span>Ver QR</span>
-            </button>
-            <StatusBadge estado={equipo.estado} size="sm" />
-          </div>
-        </div>
-
-        {/* BANNERS DE ALERTAS CRÍTICAS Y PARADA DE SEGURIDAD (Sin Glows ni Blur) */}
-        {equipo.estado === 'fuera_de_servicio' && (
-          <div className="bg-rose-950/80 border-l-4 border-rose-500 border-b border-rose-900/60 p-3.5 sm:p-4 flex items-start gap-3 text-rose-100 text-xs sm:text-sm">
-            <ShieldAlert size={20} className="text-rose-400 shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <strong className="font-bold text-rose-200 uppercase tracking-wider block font-mono">
-                PARADA DE SEGURIDAD: EQUIPO FUERA DE SERVICIO
-              </strong>
-              <p className="text-rose-200/90 leading-relaxed text-xs">
-                Este autoelevador registra defectos críticos de seguridad activos. Prohibida su operación hasta habilitación técnica de mantenimiento.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {mantenimientoInfo?.nivel === 'vencido' && (
-          <div className="bg-rose-950/60 border-l-4 border-rose-500 border-b border-rose-900/60 p-3.5 sm:p-4 flex items-start gap-3 text-rose-100 text-xs sm:text-sm">
-            <Wrench size={18} className="text-rose-400 shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <strong className="font-bold text-rose-200 uppercase tracking-wider block font-mono">
-                SERVICE PREVENTIVO VENCIDO
-              </strong>
-              <p className="text-rose-200/90 leading-relaxed text-xs">
-                {mantenimientoInfo.labelDetallado}. Coordine la entrada a taller con el supervisor.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {mantenimientoInfo?.nivel === 'proximo' && equipo.estado !== 'fuera_de_servicio' && (
-          <div className="bg-amber-950/60 border-l-4 border-amber-500 border-b border-amber-900/60 p-3.5 flex items-start gap-3 text-amber-100 text-xs sm:text-sm">
-            <Wrench size={16} className="text-amber-400 shrink-0 mt-0.5" />
-            <div className="space-y-0.5">
-              <strong className="font-bold text-amber-200 uppercase tracking-wider block font-mono text-xs">
-                AVISO DE SERVICE PREVENTIVO PRÓXIMO
-              </strong>
-              <p className="text-amber-200/90 text-xs">
-                {mantenimientoInfo.labelDetallado}.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* FRANJA DE TELEMETRÍA Y MEDIDORES TÉCNICOS (Líneas de división nítidas sin cards anidadas) */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-y sm:divide-y-0 divide-slate-800 bg-slate-950/90">
-
-          {/* Horómetro Actual */}
-          <div className="p-3.5 sm:p-4">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
-              Horómetro Actual
-            </span>
-            <p className="text-xl sm:text-2xl font-mono font-black font-tabular text-white mt-1">
-              {equipo.horometro_actual.toFixed(1)}{' '}
-              <span className="text-xs font-mono font-normal text-slate-400">h</span>
-            </p>
-          </div>
-
-          {/* Combustible / Fuente de Energía */}
-          <div className="p-3.5 sm:p-4">
-            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
-              Combustible
-            </span>
-            <p className="text-base sm:text-lg font-bold text-white mt-1">
-              {equipo.combustible || 'GLP'}
-            </p>
-          </div>
-
-          {/* Próximo Service */}
-          <div className="p-3.5 sm:p-4 col-span-2 sm:col-span-1 border-t sm:border-t-0 border-slate-800">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
-                Próximo Service
-              </span>
-              {mantenimientoInfo && (
-                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${mantenimientoInfo.colorClass.badge}`}>
-                  {mantenimientoInfo.labelCorto}
+            {/* Estado Operativo & Acción QR */}
+            <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowQrModal(true)}
+                className="px-3 py-1.5 bg-slate-950 hover:bg-slate-900 text-slate-300 font-mono font-bold text-xs rounded border border-slate-800 hover:border-slate-700 transition flex items-center gap-1.5 cursor-pointer"
+                title="Ver y descargar placa QR oficial"
+              >
+                <QrCode size={14} className="text-amber-400" />
+                <span>Ver QR</span>
+              </button>
+              <StatusBadge estado={equipo.estado} size="sm" />
+              {equipo.deleted_at && (
+                <span className="px-2 py-0.5 bg-rose-950 text-rose-300 border border-rose-600 rounded text-[10px] font-mono font-bold uppercase tracking-wider">
+                  Dado de Baja
                 </span>
               )}
             </div>
-            <p className={`text-base sm:text-lg font-mono font-black font-tabular mt-1 ${mantenimientoInfo?.colorClass.text || 'text-amber-400'}`}>
-              {equipo.horometro_proximo_mantenimiento
-                ? `${equipo.horometro_proximo_mantenimiento.toLocaleString('es-AR')} h`
-                : 'No programado'}
-            </p>
-            {mantenimientoInfo?.diferenciaHoras !== null && (
-              <p className="text-[11px] font-mono font-tabular mt-0.5 text-slate-400">
-                {mantenimientoInfo.nivel === 'vencido' ? (
-                  <span className="text-rose-400 font-bold">
-                    Excedido +{mantenimientoInfo.horasExceso?.toFixed(1)} h
-                  </span>
-                ) : (
-                  <span>Restan {mantenimientoInfo.horasRestantes?.toFixed(1)} h</span>
-                )}
-              </p>
-            )}
           </div>
+
+          {/* BANNERS DE ALERTAS CRÍTICAS Y PARADA DE SEGURIDAD (Sin Glows ni Blur) */}
+          {equipo.deleted_at && (
+            <div className="bg-rose-950/90 border-l-4 border-rose-500 border-b border-rose-900/80 p-4 flex items-start gap-3 text-rose-100 text-xs sm:text-sm">
+              <ShieldAlert size={22} className="text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <strong className="font-bold text-rose-200 uppercase tracking-wider block font-mono text-sm">
+                  AUTOELEVADOR DADO DE BAJA ADMINISTRATIVA
+                </strong>
+                <p className="text-rose-200/90 leading-relaxed text-xs">
+                  Este autoelevador ha sido dado de baja por la supervisión de planta. No está habilitado para ser operado ni realizar nuevas inspecciones. Su historial técnico permanece disponible exclusivamente a modo de consulta.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {equipo.estado === 'fuera_de_servicio' && !equipo.deleted_at && (
+            <div className="bg-rose-950/80 border-l-4 border-rose-500 border-b border-rose-900/60 p-3.5 sm:p-4 flex items-start gap-3 text-rose-100 text-xs sm:text-sm">
+              <ShieldAlert size={20} className="text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <strong className="font-bold text-rose-200 uppercase tracking-wider block font-mono">
+                  PARADA DE SEGURIDAD: EQUIPO FUERA DE SERVICIO
+                </strong>
+                <p className="text-rose-200/90 leading-relaxed text-xs">
+                  Este autoelevador registra defectos críticos de seguridad activos. Prohibida su operación hasta habilitación técnica de mantenimiento.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {mantenimientoInfo?.nivel === 'vencido' && !equipo.deleted_at && (
+            <div className="bg-rose-950/60 border-l-4 border-rose-500 border-b border-rose-900/60 p-3.5 sm:p-4 flex items-start gap-3 text-rose-100 text-xs sm:text-sm">
+              <Wrench size={18} className="text-rose-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <strong className="font-bold text-rose-200 uppercase tracking-wider block font-mono">
+                  SERVICE PREVENTIVO VENCIDO
+                </strong>
+                <p className="text-rose-200/90 leading-relaxed text-xs">
+                  {mantenimientoInfo.labelDetallado}. Coordine la entrada a taller con el supervisor.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {mantenimientoInfo?.nivel === 'proximo' && equipo.estado !== 'fuera_de_servicio' && !equipo.deleted_at && (
+            <div className="bg-amber-950/60 border-l-4 border-amber-500 border-b border-amber-900/60 p-3.5 flex items-start gap-3 text-amber-100 text-xs sm:text-sm">
+              <Wrench size={16} className="text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-0.5">
+                <strong className="font-bold text-amber-200 uppercase tracking-wider block font-mono text-xs">
+                  AVISO DE SERVICE PREVENTIVO PRÓXIMO
+                </strong>
+                <p className="text-amber-200/90 text-xs">
+                  {mantenimientoInfo.labelDetallado}.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* FRANJA DE TELEMETRÍA Y MEDIDORES TÉCNICOS (Líneas de división nítidas sin cards anidadas) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 divide-x divide-y sm:divide-y-0 divide-slate-800 bg-slate-950/90">
+
+            {/* Horómetro Actual */}
+            <div className="p-3.5 sm:p-4">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
+                Horómetro Actual
+              </span>
+              <p className="text-xl sm:text-2xl font-mono font-black font-tabular text-white mt-1">
+                {equipo.horometro_actual.toFixed(1)}{' '}
+                <span className="text-xs font-mono font-normal text-slate-400">h</span>
+              </p>
+            </div>
+
+            {/* Combustible / Fuente de Energía */}
+            <div className="p-3.5 sm:p-4">
+              <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
+                Combustible
+              </span>
+              <p className="text-base sm:text-lg font-bold text-white mt-1">
+                {equipo.combustible || 'GLP'}
+              </p>
+            </div>
+
+            {/* Próximo Service */}
+            <div className="p-3.5 sm:p-4 col-span-2 sm:col-span-1 border-t sm:border-t-0 border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
+                  Próximo Service
+                </span>
+                {mantenimientoInfo && (
+                  <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${mantenimientoInfo.colorClass.badge}`}>
+                    {mantenimientoInfo.labelCorto}
+                  </span>
+                )}
+              </div>
+              <p className={`text-base sm:text-lg font-mono font-black font-tabular mt-1 ${mantenimientoInfo?.colorClass.text || 'text-amber-400'}`}>
+                {equipo.horometro_proximo_mantenimiento
+                  ? `${equipo.horometro_proximo_mantenimiento.toLocaleString('es-AR')} h`
+                  : 'No programado'}
+              </p>
+              {mantenimientoInfo?.diferenciaHoras !== null && (
+                <p className="text-[11px] font-mono font-tabular mt-0.5 text-slate-400">
+                  {mantenimientoInfo.nivel === 'vencido' ? (
+                    <span className="text-rose-400 font-bold">
+                      Excedido +{mantenimientoInfo.horasExceso?.toFixed(1)} h
+                    </span>
+                  ) : (
+                    <span>Restan {mantenimientoInfo.horasRestantes?.toFixed(1)} h</span>
+                  )}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* FORMULARIO DE INICIO DE CHECKLIST TPM DE TURNO */}
+          {equipo.deleted_at ? (
+            <div className="p-6 bg-[#0e1420] border-t border-slate-800 text-center space-y-2">
+              <div className="w-10 h-10 rounded-full bg-rose-950/80 border border-rose-500/50 text-rose-400 mx-auto flex items-center justify-center">
+                <ShieldAlert size={20} />
+              </div>
+              <h3 className="font-mono font-bold text-sm text-rose-300 uppercase tracking-wider">
+                CHECKLIST DESHABILITADO POR BAJA ADMINISTRATIVA
+              </h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                Este autoelevador fue dado de baja y no permite iniciar nuevas inspecciones de turno. Si requiere reactivarlo, contacte al supervisor de planta.
+              </p>
+            </div>
+          ) : (
+            <form onSubmit={handleStartInspection} className="p-4 sm:p-6 space-y-4 border-t border-slate-800 bg-[#0e1420]">
+
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
+                  REGISTRO DE INGRESO DE TURNO
+                </h2>
+                <span className="text-[10px] font-mono text-amber-400 font-bold uppercase">
+                  CHECKLIST NIVEL 1
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+                {/* Identidad del Operador Activo */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                    Operador Responsable
+                  </label>
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-md flex items-center justify-between">
+                    <div>
+                      <span className="text-sm font-bold text-white block">
+                        {operador ? operador.nombre : 'Sin operador autenticado'}
+                      </span>
+                      <span className="text-xs font-mono text-slate-400">
+                        {operador?.legajo ? `Legajo #${operador.legajo}` : 'Debe autenticarse'}
+                      </span>
+                    </div>
+                    <Link
+                      href="/login"
+                      className="text-xs font-bold text-amber-400 hover:text-amber-300 underline font-mono cursor-pointer"
+                    >
+                      {operador ? 'Cambiar' : 'Ingresar'}
+                    </Link>
+                  </div>
+                </div>
+
+                {/* Input de Horómetro en Tablero */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                      Lectura de Horómetro <span className="text-amber-400">*</span>
+                    </label>
+                    <span className="text-[11px] font-mono text-slate-500">
+                      Anterior: <strong className="text-slate-300 font-tabular">{equipo.horometro_actual.toFixed(1)} h</strong>
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      inputMode="decimal"
+                      value={horometro}
+                      onChange={(e) => {
+                        setHorometro(e.target.value);
+                        if (horometroConfirmacionModal) setHorometroConfirmacionModal(null);
+                      }}
+                      required
+                      placeholder="Ej: 1245.5"
+                      className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-md px-3.5 py-3 text-base font-bold text-white placeholder-slate-600 focus:outline-none font-mono font-tabular"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-amber-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      HORAS
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botón de Acción Principal de la Pantalla */}
+              <button
+                type="submit"
+                className="w-full min-h-[48px] py-3.5 px-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider rounded-md transition flex items-center justify-center gap-2 border border-amber-400 cursor-pointer btn-tactile mt-2"
+              >
+                <Play size={16} fill="currentColor" />
+                <span>INICIAR CHECKLIST TPM</span>
+              </button>
+            </form>
+          )}
         </div>
+      </ScrollReveal>
 
-        {/* FORMULARIO DE INICIO DE CHECKLIST TPM DE TURNO */}
-        <form onSubmit={handleStartInspection} className="p-4 sm:p-6 space-y-4 border-t border-slate-800 bg-[#0e1420]">
+      {/* SECCIÓN: BITÁCORA TÉCNICA DE INSPECCIONES HISTÓRICAS */}
+      <ScrollReveal delay={150}>
+        <div className="bg-[#0e1420] border border-slate-800 rounded-lg overflow-hidden">
 
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
-              REGISTRO DE INGRESO DE TURNO
-            </h2>
-            <span className="text-[10px] font-mono text-amber-400 font-bold uppercase">
-              CHECKLIST NIVEL 1
+          {/* Encabezado del Registro Técnico */}
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#0b0f17]">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
+                BITÁCORA TÉCNICA DE INSPECCIONES
+              </h2>
+              {!loadingInspecciones && (
+                <span className="text-xs bg-slate-950 text-amber-400 font-mono font-bold px-2 py-0.5 rounded border border-slate-800">
+                  {inspecciones.length} REGISTROS
+                </span>
+              )}
+            </div>
+            <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
+              HISTORIAL OFICIAL DE PLANTA
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-            {/* Identidad del Operador Activo */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400">
-                Operador Responsable
-              </label>
-              <div className="p-3 bg-slate-950 border border-slate-800 rounded-md flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-bold text-white block">
-                    {operador ? operador.nombre : 'Sin operador autenticado'}
-                  </span>
-                  <span className="text-xs font-mono text-slate-400">
-                    {operador?.legajo ? `Legajo #${operador.legajo}` : 'Debe autenticarse'}
-                  </span>
-                </div>
-                <Link
-                  href="/login"
-                  className="text-xs font-bold text-amber-400 hover:text-amber-300 underline font-mono cursor-pointer"
-                >
-                  {operador ? 'Cambiar' : 'Ingresar'}
-                </Link>
-              </div>
-            </div>
-
-            {/* Input de Horómetro en Tablero */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400">
-                  Lectura de Horómetro <span className="text-amber-400">*</span>
-                </label>
-                <span className="text-[11px] font-mono text-slate-500">
-                  Anterior: <strong className="text-slate-300 font-tabular">{equipo.horometro_actual.toFixed(1)} h</strong>
-                </span>
-              </div>
-
-              <div className="relative">
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  inputMode="decimal"
-                  value={horometro}
-                  onChange={(e) => {
-                    setHorometro(e.target.value);
-                    if (horometroConfirmacionModal) setHorometroConfirmacionModal(null);
-                  }}
-                  required
-                  placeholder="Ej: 1245.5"
-                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-md px-3.5 py-3 text-base font-bold text-white placeholder-slate-600 focus:outline-none font-mono font-tabular"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-amber-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                  HORAS
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Botón de Acción Principal de la Pantalla */}
-          <button
-            type="submit"
-            className="w-full min-h-[48px] py-3.5 px-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider rounded-md transition flex items-center justify-center gap-2 border border-amber-400 cursor-pointer btn-tactile mt-2"
-          >
-            <Play size={16} fill="currentColor" />
-            <span>INICIAR CHECKLIST TPM</span>
-          </button>
-        </form>
-      </div>
-
-      {/* SECCIÓN: BITÁCORA TÉCNICA DE INSPECCIONES HISTÓRICAS */}
-      <div className="bg-[#0e1420] border border-slate-800 rounded-lg overflow-hidden">
-
-        {/* Encabezado del Registro Técnico */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-[#0b0f17]">
-          <div className="flex items-center gap-2">
-            <h2 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-200">
-              BITÁCORA TÉCNICA DE INSPECCIONES
-            </h2>
-            {!loadingInspecciones && (
-              <span className="text-xs bg-slate-950 text-amber-400 font-mono font-bold px-2 py-0.5 rounded border border-slate-800">
-                {inspecciones.length} REGISTROS
-              </span>
-            )}
-          </div>
-          <span className="text-[11px] font-mono text-slate-500 hidden sm:inline">
-            HISTORIAL OFICIAL DE PLANTA
-          </span>
-        </div>
-
-        {/* Lista de Registros de Bitácora */}
-        <div className="divide-y divide-slate-800 bg-slate-950/40">
+          {/* Lista de Registros de Bitácora */}
+          <div className="divide-y divide-slate-800 bg-slate-950/40">
           {loadingInspecciones ? (
             <div className="py-10 text-center space-y-2">
               <div className="w-6 h-6 border-2 border-amber-400 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -711,51 +727,54 @@ export default function EquipoFichaPage() {
           )}
         </div>
       </div>
+      </ScrollReveal>
 
       {/* MODAL LIGHTBOX PARA FOTO DE FALLA */}
       {previewFotoUrl && (
-        <div
-          onClick={() => setPreviewFotoUrl(null)}
-          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer"
-        >
+        <ModalPortal>
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="relative max-w-3xl w-full bg-slate-900 border border-slate-700 rounded-lg overflow-hidden shadow-2xl space-y-3 p-4"
+            onClick={() => setPreviewFotoUrl(null)}
+            className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 cursor-pointer overflow-y-auto w-screen h-dvh min-h-dvh"
           >
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 className="text-xs font-mono font-bold uppercase text-white flex items-center gap-2">
-                <ImageIcon size={15} className="text-amber-400" />
-                EVIDENCIA FOTOGRÁFICA DE DEFECTO
-              </h3>
-              <button
-                type="button"
-                onClick={() => setPreviewFotoUrl(null)}
-                className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-3xl w-full bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl space-y-3 p-4 my-auto max-h-[90dvh] flex flex-col"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <h3 className="text-xs font-mono font-bold uppercase text-white flex items-center gap-2">
+                  <ImageIcon size={15} className="text-amber-400" />
+                  EVIDENCIA FOTOGRÁFICA DE DEFECTO
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setPreviewFotoUrl(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-800 transition cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
 
-            <div className="max-h-[75vh] overflow-hidden rounded bg-slate-950 flex items-center justify-center">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={previewFotoUrl}
-                alt="Evidencia ampliada"
-                className="max-h-[75vh] w-auto object-contain rounded"
-              />
-            </div>
+              <div className="max-h-[75dvh] overflow-hidden rounded bg-slate-950 flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={previewFotoUrl}
+                  alt="Evidencia ampliada"
+                  className="max-h-[75dvh] w-auto object-contain rounded"
+                />
+              </div>
 
-            <div className="flex justify-end pt-1">
-              <button
-                type="button"
-                onClick={() => setPreviewFotoUrl(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono font-bold rounded transition cursor-pointer"
-              >
-                CERRAR
-              </button>
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={() => setPreviewFotoUrl(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-mono font-bold rounded transition cursor-pointer"
+                >
+                  CERRAR
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
 
       {/* MODAL PARA VISUALIZAR Y DESCARGAR QR */}
@@ -769,70 +788,72 @@ export default function EquipoFichaPage() {
 
       {/* MODAL DE CONFIRMACIÓN DE HORÓMETRO ALTO (+100 hs) */}
       {horometroConfirmacionModal && (
-        <div
-          onClick={() => setHorometroConfirmacionModal(null)}
-          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
-        >
+        <ModalPortal>
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="relative max-w-md w-full bg-[#0e1420] border border-amber-500/60 rounded-lg p-5 sm:p-6 shadow-2xl space-y-4"
+            onClick={() => setHorometroConfirmacionModal(null)}
+            className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh"
           >
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
-              <div className="w-10 h-10 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40">
-                <AlertTriangle size={22} />
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-md w-full bg-[#0e1420] border border-amber-500/60 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto"
+            >
+              <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                <div className="w-10 h-10 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40">
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white uppercase tracking-tight font-mono">
+                    ¿Confirmar Lectura de Horómetro?
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono">
+                    La lectura ingresada presenta un incremento alto respecto al último registro.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-white uppercase tracking-tight font-mono">
-                  ¿Confirmar Lectura de Horómetro?
-                </h3>
-                <p className="text-xs text-slate-400 font-mono">
-                  La lectura ingresada presenta un incremento alto respecto al último registro.
-                </p>
-              </div>
-            </div>
 
-            <div className="bg-slate-950 border border-slate-800 rounded p-4 space-y-2 text-xs sm:text-sm">
-              <div className="flex justify-between items-center text-slate-400 font-mono">
-                <span>Último registrado:</span>
-                <span className="font-bold text-white font-tabular">
-                  {equipo.horometro_actual.toFixed(1)} h
-                </span>
+              <div className="bg-slate-950 border border-slate-800 rounded p-4 space-y-2 text-xs sm:text-sm">
+                <div className="flex justify-between items-center text-slate-400 font-mono">
+                  <span>Último registrado:</span>
+                  <span className="font-bold text-white font-tabular">
+                    {equipo.horometro_actual.toFixed(1)} h
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-slate-400 font-mono">
+                  <span>Ingresado ahora:</span>
+                  <span className="font-bold text-amber-400 font-tabular">
+                    {horometroConfirmacionModal.numHorometro.toFixed(1)} h
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-amber-300 font-bold font-mono border-t border-slate-800 pt-2">
+                  <span>Diferencia:</span>
+                  <span className="font-bold font-tabular text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-500/40">
+                    +{horometroConfirmacionModal.diferencia.toFixed(1)} h
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between items-center text-slate-400 font-mono">
-                <span>Ingresado ahora:</span>
-                <span className="font-bold text-amber-400 font-tabular">
-                  {horometroConfirmacionModal.numHorometro.toFixed(1)} h
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-amber-300 font-bold font-mono border-t border-slate-800 pt-2">
-                <span>Diferencia:</span>
-                <span className="font-bold font-tabular text-amber-400 bg-amber-950 px-2 py-0.5 rounded border border-amber-500/40">
-                  +{horometroConfirmacionModal.diferencia.toFixed(1)} h
-                </span>
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => setHorometroConfirmacionModal(null)}
-                className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono font-bold text-xs rounded transition cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
-              >
-                Corregir
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setHorometroConfirmacionModal(null);
-                  handleStartInspection(undefined, true);
-                }}
-                className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-xs rounded transition shadow-md cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
-              >
-                Confirmar y Continuar
-              </button>
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setHorometroConfirmacionModal(null)}
+                  className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono font-bold text-xs rounded transition cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
+                >
+                  Corregir
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setHorometroConfirmacionModal(null);
+                    handleStartInspection(undefined, true);
+                  }}
+                  className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-xs rounded transition shadow-md cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
+                >
+                  Confirmar y Continuar
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </ModalPortal>
       )}
     </div>
   );

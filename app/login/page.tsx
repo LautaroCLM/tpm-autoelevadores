@@ -3,14 +3,17 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { signInWithCredentials, getCurrentSessionAndProfile } from '../../lib/api/auth';
+import { signInWithCredentials } from '../../lib/api/auth';
+import { useAuth } from '../../components/AuthProvider';
 import { sanitizeRedirectUrl } from '../../lib/utils/auth-helpers';
 import { ShieldCheck, Lock, User, ArrowRight, ArrowLeft } from 'lucide-react';
 import { toast } from 'sonner';
+import { ScrollReveal } from '../../components/ScrollReveal';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user, perfil, loading: authLoading } = useAuth();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [rememberUser, setRememberUser] = useState(false);
@@ -29,18 +32,16 @@ function LoginForm() {
 
   // Si el usuario ya tiene sesión activa válida para hoy, redirigir automáticamente
   useEffect(() => {
-    getCurrentSessionAndProfile().then(({ user, perfil }) => {
-      if (user) {
-        const rawRedirect = searchParams?.get('redirect') || searchParams?.get('redirectTo');
-        const fallbackTarget =
-          perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
-        const target = sanitizeRedirectUrl(rawRedirect, fallbackTarget);
-        if (target && target !== '/login') {
-          router.replace(target);
-        }
+    if (!authLoading && user) {
+      const rawRedirect = searchParams?.get('redirect') || searchParams?.get('redirectTo');
+      const fallbackTarget =
+        perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento' ? '/dashboard' : '/';
+      const target = sanitizeRedirectUrl(rawRedirect, fallbackTarget);
+      if (target && target !== '/login') {
+        router.replace(target);
       }
-    });
-  }, [searchParams, router]);
+    }
+  }, [user, perfil, authLoading, searchParams, router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,89 +103,91 @@ function LoginForm() {
         <span>Volver a la consola principal</span>
       </Link>
 
-      <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-8 shadow-2xl shadow-black/60 space-y-6 relative overflow-hidden">
-        {/* Plant Header Badge */}
-        <div className="space-y-3 text-center">
-          <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-inner">
-            <ShieldCheck size={26} />
-          </div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono uppercase tracking-wider text-slate-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-            Terminal de Acceso Seguro
-          </div>
-          <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-            TPM Autoelevadores
-          </h1>
-          <p className="text-xs text-slate-400 max-w-xs mx-auto">
-            Identificación de Operadores y Supervisores para mantenimiento y checklist diario
-          </p>
-        </div>
-
-        {/* Formulario */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-              Usuario, Legajo o Correo
-            </label>
-            <div className="relative">
-              <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="text"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                required
-                placeholder="Ej: 4029 o supervisor@tpm.com"
-                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-base sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
-              />
+      <ScrollReveal direction="up" distance={16}>
+        <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-4 sm:p-8 shadow-2xl shadow-black/60 space-y-6 relative overflow-hidden">
+          {/* Plant Header Badge */}
+          <div className="space-y-3 text-center">
+            <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mx-auto shadow-inner">
+              <ShieldCheck size={26} />
             </div>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-              Contraseña
-            </label>
-            <div className="relative">
-              <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-base sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
-              />
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-slate-950/80 border border-slate-800 text-[10px] font-mono uppercase tracking-wider text-slate-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+              Terminal de Acceso Seguro
             </div>
+            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              TPM Autoelevadores
+            </h1>
+            <p className="text-xs text-slate-400 max-w-xs mx-auto">
+              Identificación de Operadores y Supervisores para mantenimiento y checklist diario
+            </p>
           </div>
 
-          {/* Opción Recordar Usuario */}
-          <div className="flex items-center justify-between pt-1">
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={rememberUser}
-                onChange={(e) => setRememberUser(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-700 bg-[#0B0F17] text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
-              />
-              <span className="text-xs text-slate-300 font-medium">Recordar usuario</span>
-            </label>
+          {/* Formulario */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                Usuario, Legajo o Correo
+              </label>
+              <div className="relative">
+                <User size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="text"
+                  value={identifier}
+                  onChange={(e) => setIdentifier(e.target.value)}
+                  required
+                  placeholder="Ej: 4029 o supervisor@tpm.com"
+                  className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-base sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                Contraseña
+              </label>
+              <div className="relative">
+                <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  placeholder="••••••••"
+                  className="w-full pl-10 pr-4 py-3 bg-[#0B0F17] border border-slate-800 rounded-xl text-base sm:text-sm text-white placeholder-slate-600 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-medium"
+                />
+              </div>
+            </div>
+
+            {/* Opción Recordar Usuario */}
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={rememberUser}
+                  onChange={(e) => setRememberUser(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-700 bg-[#0B0F17] text-amber-500 focus:ring-amber-500 focus:ring-offset-slate-900"
+                />
+                <span className="text-xs text-slate-300 font-medium">Recordar usuario</span>
+              </label>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn-tactile w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
+            >
+              <span>{loading ? 'Verificando credenciales...' : 'Iniciar Sesión'}</span>
+              <ArrowRight size={16} />
+            </button>
+          </form>
+
+          <div className="pt-4 border-t border-slate-800/80 text-center">
+            <p className="text-[11px] font-mono text-slate-500">
+              La sesión permanecerá activa durante la jornada de trabajo.
+            </p>
           </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="btn-tactile w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
-          >
-            <span>{loading ? 'Verificando credenciales...' : 'Iniciar Sesión'}</span>
-            <ArrowRight size={16} />
-          </button>
-        </form>
-
-        <div className="pt-4 border-t border-slate-800/80 text-center">
-          <p className="text-[11px] font-mono text-slate-500">
-            La sesión permanecerá activa durante la jornada de trabajo.
-          </p>
         </div>
-      </div>
+      </ScrollReveal>
     </div>
   );
 }
