@@ -47,6 +47,10 @@ import {
   Info,
   Clock,
   HelpCircle,
+  Loader2,
+  QrCode,
+  LayoutDashboard,
+  WifiOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -436,39 +440,54 @@ export default function InspeccionChecklistPage() {
   // PANTALLA DE ÉXITO AL FINALIZAR
   // PANTALLA DE ÉXITO AL FINALIZAR
   if (completedResult) {
+  if (completedResult && equipo) {
+    const isOfflineResult = completedResult.inspeccionId === 'offline-queued';
+
     return (
-      <div className="max-w-xl mx-auto px-4 py-8 sm:py-12 w-full text-center space-y-6">
+      <div className="max-w-xl mx-auto px-3 sm:px-4 py-8 sm:py-12 w-full text-center space-y-6 animate-fade-in">
+        {/* Icono central de resultado con resplandor atenuado (glow) */}
         <div
-          className={`w-20 h-20 rounded-2xl mx-auto flex items-center justify-center shadow-2xl border-2 ${
+          className={`w-20 h-20 rounded-2xl mx-auto flex items-center justify-center border-2 transition-transform duration-300 scale-100 ${
             completedResult.estadoResultante === 'operativo'
-              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/50 shadow-emerald-950/40'
+              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-500/50 shadow-[0_0_25px_rgba(16,185,129,0.25)]'
               : completedResult.estadoResultante === 'observado'
-              ? 'bg-amber-950/60 text-amber-400 border-amber-500/50 shadow-amber-950/40'
-              : 'bg-rose-950/80 text-rose-300 border-rose-500/60 shadow-rose-950/60 animate-pulse'
+              ? 'bg-amber-950/60 text-amber-400 border-amber-500/50 shadow-[0_0_25px_rgba(245,158,11,0.25)]'
+              : 'bg-rose-950/80 text-rose-300 border-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.3)] animate-pulse'
           }`}
         >
           {completedResult.estadoResultante === 'operativo' ? (
-            <CheckCircle2 size={42} />
+            <CheckCircle2 size={42} aria-hidden="true" />
           ) : completedResult.estadoResultante === 'observado' ? (
-            <AlertTriangle size={42} />
+            <AlertTriangle size={42} aria-hidden="true" />
           ) : (
-            <ShieldAlert size={42} />
+            <ShieldAlert size={42} aria-hidden="true" />
           )}
         </div>
 
-        <div className="space-y-1.5">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-slate-900 border border-slate-800 text-[11px] font-bold uppercase tracking-wider text-slate-400 font-mono">
-            Checklist Registrado Exitosamente
-          </div>
+        {/* Encabezado y títulos */}
+        <div className="space-y-2">
+          {isOfflineResult ? (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-950/80 border border-amber-500/50 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-amber-300 font-mono shadow-xs">
+              <WifiOff size={13} aria-hidden="true" />
+              <span>GUARDADO LOCALMENTE • PENDIENTE DE SINCRONIZACIÓN</span>
+            </div>
+          ) : (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-emerald-300 font-mono shadow-xs">
+              <CheckCircle2 size={13} aria-hidden="true" />
+              <span>REGISTRADO EN SERVIDOR • SINCRONIZADO</span>
+            </div>
+          )}
+
           <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-            Inspección TPM Finalizada
+            Inspección Completada
           </h1>
-          <p className="text-sm text-slate-300 font-medium">
+          <p className="text-xs sm:text-sm text-slate-300 font-medium">
             Autoelevador Interno #{equipo.interno} — {equipo.marca} {equipo.modelo}
           </p>
         </div>
 
-        <div className="bg-[#111724] border border-slate-800 rounded-2xl p-5 text-left space-y-3.5 shadow-xl">
+        {/* Tarjeta técnica de resumen */}
+        <div className="bg-[#111724] border border-slate-800 rounded-2xl p-4 sm:p-5 text-left space-y-4 shadow-xl">
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
               Estado Resultante en Sistema
@@ -476,24 +495,51 @@ export default function InspeccionChecklistPage() {
             <StatusBadge estado={completedResult.estadoResultante} size="md" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-              <span className="text-slate-400 font-medium block">Horómetro Registrado</span>
-              <p className="font-mono font-tabular font-black text-white text-base mt-0.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Gauge size={16} className="text-amber-400 shrink-0" aria-hidden="true" />
+                <span className="text-slate-400 font-medium">Horómetro</span>
+              </div>
+              <p className="font-mono font-tabular font-black text-white text-sm">
                 {horometroParam || equipo.horometro_actual} hs
               </p>
             </div>
-            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80">
-              <span className="text-slate-400 font-medium block">Fallas Reportadas</span>
-              <p className={`font-black text-base mt-0.5 ${completedResult.fallasCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
+
+            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={16} className={completedResult.fallasCount > 0 ? 'text-amber-400 shrink-0' : 'text-slate-500 shrink-0'} aria-hidden="true" />
+                <span className="text-slate-400 font-medium">Fallas Reportadas</span>
+              </div>
+              <p className={`font-black text-sm ${completedResult.fallasCount > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
                 {completedResult.fallasCount} defecto(s)
+              </p>
+            </div>
+
+            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <User size={16} className="text-slate-400 shrink-0" aria-hidden="true" />
+                <span className="text-slate-400 font-medium">Operador</span>
+              </div>
+              <p className="font-bold text-slate-200 text-xs truncate max-w-[130px]">
+                {operadorNombre}
+              </p>
+            </div>
+
+            <div className="bg-slate-950/70 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Clock size={16} className="text-slate-400 shrink-0" aria-hidden="true" />
+                <span className="text-slate-400 font-medium">Registro</span>
+              </div>
+              <p className="font-mono text-slate-300 text-[11px] font-bold">
+                {isOfflineResult ? 'Local (IndexedDB)' : 'Confirmado'}
               </p>
             </div>
           </div>
 
           {completedResult.estadoResultante === 'fuera_de_servicio' && (
             <div className="bg-rose-950/40 border border-rose-500/40 rounded-xl p-3.5 text-rose-200 text-xs flex items-start gap-2.5">
-              <ShieldAlert size={18} className="text-rose-400 shrink-0 mt-0.5" />
+              <ShieldAlert size={18} className="text-rose-400 shrink-0 mt-0.5" aria-hidden="true" />
               <span>
                 <strong className="text-rose-300 block mb-0.5 uppercase tracking-wider font-bold">
                   Parada de Máquina Requerida
@@ -504,22 +550,26 @@ export default function InspeccionChecklistPage() {
           )}
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+        {/* Botonera Final */}
+        <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <Link
             href="/"
             className="flex-1 min-h-[48px] py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 btn-tactile cursor-pointer"
           >
+            <QrCode size={18} aria-hidden="true" />
             <span>Escanear Otro Equipo</span>
           </Link>
           <Link
             href="/dashboard"
-            className="flex-1 min-h-[48px] py-3 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-800 btn-tactile cursor-pointer"
+            className="flex-1 min-h-[48px] py-3 px-4 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 border border-slate-700 btn-tactile cursor-pointer"
           >
+            <LayoutDashboard size={18} aria-hidden="true" />
             <span>Ver en Dashboard</span>
           </Link>
         </div>
       </div>
     );
+  }
   }
 
   const handleBackClick = () => {
@@ -838,10 +888,19 @@ export default function InspeccionChecklistPage() {
               type="button"
               disabled={isSubmitting}
               onClick={handleSubmitInspection}
-              className="min-h-[46px] py-2.5 px-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 disabled:opacity-50 cursor-pointer btn-tactile"
+              className="min-h-[46px] min-w-[190px] py-2.5 px-6 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer btn-tactile"
             >
-              <Send size={16} />
-              <span>{isSubmitting ? 'Guardando en Sistema...' : 'Finalizar Inspección'}</span>
+              {isSubmitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin text-slate-950" />
+                  <span>Enviando inspección...</span>
+                </>
+              ) : (
+                <>
+                  <Send size={16} />
+                  <span>Finalizar Inspección</span>
+                </>
+              )}
             </button>
           )}
         </div>

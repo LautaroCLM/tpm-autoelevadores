@@ -6,7 +6,7 @@ import Link from 'next/link';
 import { signInWithCredentials } from '../../lib/api/auth';
 import { useAuth } from '../../components/AuthProvider';
 import { sanitizeRedirectUrl } from '../../lib/utils/auth-helpers';
-import { ShieldCheck, Lock, User, ArrowRight, ArrowLeft } from 'lucide-react';
+import { ShieldCheck, Lock, User, ArrowRight, ArrowLeft, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ScrollReveal } from '../../components/ScrollReveal';
 
@@ -174,10 +174,19 @@ function LoginForm() {
             <button
               type="submit"
               disabled={loading}
-              className="btn-tactile w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
+              className="btn-tactile w-full py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer mt-2"
             >
-              <span>{loading ? 'Verificando credenciales...' : 'Iniciar Sesión'}</span>
-              <ArrowRight size={16} />
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin text-slate-950" />
+                  <span>Verificando credenciales...</span>
+                </>
+              ) : (
+                <>
+                  <span>Iniciar Sesión</span>
+                  <ArrowRight size={16} />
+                </>
+              )}
             </button>
           </form>
 

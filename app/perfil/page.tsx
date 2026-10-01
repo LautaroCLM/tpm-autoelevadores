@@ -21,6 +21,7 @@ import {
   Hash,
   AlertCircle,
   Copy,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
@@ -333,10 +334,19 @@ export default function MiPerfilPage() {
                   <button
                     type="submit"
                     disabled={saving}
-                    className="btn-tactile w-full sm:flex-1 py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                    className="btn-tactile w-full sm:flex-1 py-3.5 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
                   >
-                    <Check size={16} />
-                    <span>{saving ? 'Guardando cambios...' : 'Guardar cambios'}</span>
+                    {saving ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin text-slate-950" />
+                        <span>Guardando cambios...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={16} />
+                        <span>Guardar cambios</span>
+                      </>
+                    )}
                   </button>
 
                   <button

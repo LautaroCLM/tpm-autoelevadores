@@ -198,6 +198,12 @@ export default function SupervisorDashboardPage() {
   const mantenimientoProximos = mantenimientoStats.filter((m) => m.nivel === 'proximo').length;
   const mantenimientoAlDia = mantenimientoStats.filter((m) => m.nivel === 'al_dia').length;
 
+  // Equipos con atención prioritaria en planta (Fuera de Servicio o Service Vencido)
+  const equiposAtencionPrioritaria = equiposActivos.filter((e) => {
+    const maint = calcularEstadoMantenimiento(e.horometro_actual, e.horometro_proximo_mantenimiento);
+    return e.estado === 'fuera_de_servicio' || maint.nivel === 'vencido';
+  });
+
   const handleUpdateFallaStatus = async (
     fallaId: string,
     nuevoEstado: Falla['estado_reparacion']
@@ -423,114 +429,249 @@ export default function SupervisorDashboardPage() {
         </div>
       </ScrollReveal>
 
-      {/* KPI Cards */}
+      {/* KPI Cards Rediseñadas */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-4">
         <ScrollReveal delay={0} distance={12}>
-          <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Truck size={13} className="text-slate-500 shrink-0" /> Flota Total
-            </span>
-            <div className="text-2xl font-mono font-tabular font-black text-white mt-1.5">{totalEquipos}</div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Unidades registradas</span>
+          <div className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/80 rounded-2xl p-3.5 sm:p-4 shadow-md transition card-hover h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <Truck size={14} className="text-slate-500 shrink-0" /> Flota Total
+              </span>
+              <span className="w-2 h-2 rounded-full bg-slate-600"></span>
+            </div>
+            <div className="my-2">
+              <div className="text-2xl sm:text-3xl font-mono font-tabular font-black text-white">{totalEquipos}</div>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Unidades en planta</span>
           </div>
         </ScrollReveal>
 
         <ScrollReveal delay={40} distance={12}>
-          <div className="bg-[#111724] border border-emerald-500/30 bg-emerald-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-              <CheckCircle2 size={13} className="shrink-0" /> Operativos
-            </span>
-            <div className="text-2xl font-mono font-tabular font-black text-emerald-400 mt-1.5">{operativos}</div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Listos en línea</span>
+          <div className="bg-[#111724] border border-emerald-500/30 bg-emerald-500/[0.03] hover:border-emerald-500/50 rounded-2xl p-3.5 sm:p-4 shadow-md transition card-hover h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                <CheckCircle2 size={14} className="shrink-0" /> Operativos
+              </span>
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/50"></span>
+            </div>
+            <div className="my-2">
+              <div className="text-2xl sm:text-3xl font-mono font-tabular font-black text-emerald-400">{operativos}</div>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">En servicio activo</span>
           </div>
         </ScrollReveal>
 
         <ScrollReveal delay={80} distance={12}>
-          <div className="bg-[#111724] border border-amber-500/30 bg-amber-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-              <AlertTriangle size={13} className="shrink-0" /> Observados
-            </span>
-            <div className="text-2xl font-mono font-tabular font-black text-amber-400 mt-1.5">{observados}</div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fallas leves / medias</span>
+          <div className="bg-[#111724] border border-amber-500/30 bg-amber-500/[0.03] hover:border-amber-500/50 rounded-2xl p-3.5 sm:p-4 shadow-md transition card-hover h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <AlertTriangle size={14} className="shrink-0" /> Observados
+              </span>
+              <span className="w-2 h-2 rounded-full bg-amber-400 shadow-sm shadow-amber-400/50"></span>
+            </div>
+            <div className="my-2">
+              <div className="text-2xl sm:text-3xl font-mono font-tabular font-black text-amber-400">{observados}</div>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Con novedades leves</span>
           </div>
         </ScrollReveal>
 
         <ScrollReveal delay={120} distance={12}>
-          <div className="bg-[#111724] border border-rose-500/40 bg-rose-500/[0.05] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
-              <ShieldAlert size={13} className="shrink-0" /> Parados
-            </span>
-            <div className="text-2xl font-mono font-tabular font-black text-rose-400 mt-1.5">{fueraServicio}</div>
+          <div className="bg-[#111724] border border-rose-500/40 bg-rose-500/[0.05] hover:border-rose-500/60 rounded-2xl p-3.5 sm:p-4 shadow-md transition card-hover h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                <ShieldAlert size={14} className="shrink-0" /> Parados
+              </span>
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shadow-sm shadow-rose-500/50"></span>
+            </div>
+            <div className="my-2">
+              <div className="text-2xl sm:text-3xl font-mono font-tabular font-black text-rose-400">{fueraServicio}</div>
+            </div>
             <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Fuera de servicio</span>
           </div>
         </ScrollReveal>
 
         <ScrollReveal delay={160} distance={12}>
-          <div className="bg-[#111724] border border-orange-500/30 bg-orange-500/[0.03] rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full">
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
-              <AlertOctagon size={13} className="shrink-0" /> Fallas
-            </span>
-            <div className="text-2xl font-mono font-tabular font-black text-orange-400 mt-1.5">{fallasPendientes}</div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">En reparación</span>
+          <div className="bg-[#111724] border border-orange-500/30 bg-orange-500/[0.03] hover:border-orange-500/50 rounded-2xl p-3.5 sm:p-4 shadow-md transition card-hover h-full flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-orange-400 flex items-center gap-1.5">
+                <AlertOctagon size={14} className="shrink-0" /> Fallas
+              </span>
+              <span className="w-2 h-2 rounded-full bg-orange-400 shadow-sm shadow-orange-400/50"></span>
+            </div>
+            <div className="my-2">
+              <div className="text-2xl sm:text-3xl font-mono font-tabular font-black text-orange-400">{fallasPendientes}</div>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500">Reportes pendientes</span>
           </div>
         </ScrollReveal>
 
         <ScrollReveal delay={200} distance={12}>
-          <div className={`bg-[#111724] border rounded-2xl p-3 sm:p-4 shadow-md card-hover h-full ${
+          <div className={`bg-[#111724] border rounded-2xl p-3.5 sm:p-4 shadow-md transition card-hover h-full flex flex-col justify-between ${
             mantenimientoVencidos > 0
-              ? 'border-rose-500/40 bg-rose-500/5'
+              ? 'border-rose-500/50 bg-rose-500/[0.06]'
               : mantenimientoProximos > 0
-              ? 'border-amber-500/40 bg-amber-500/5'
-              : 'border-slate-800/90'
+              ? 'border-amber-500/40 bg-amber-500/[0.04]'
+              : 'border-slate-800/90 hover:border-slate-700/80'
           }`}>
-            <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-              <Wrench size={13} className="shrink-0" /> Service hs
-            </span>
-            <div className="flex items-baseline gap-1.5 mt-1.5">
-              <span className={`text-2xl font-mono font-tabular font-black ${mantenimientoVencidos > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
-                {mantenimientoVencidos}
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                <Wrench size={14} className="shrink-0" /> Service hs
               </span>
-              <span className="text-[10px] font-mono text-slate-400 font-semibold">venc.</span>
-              <span className="text-slate-600">/</span>
-              <span className={`text-xl font-mono font-tabular font-bold ${mantenimientoProximos > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
-                {mantenimientoProximos}
-              </span>
-              <span className="text-[10px] font-mono text-slate-400 font-semibold">próx.</span>
+              {mantenimientoVencidos > 0 ? (
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+              ) : (
+                <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              )}
             </div>
-            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500 block mt-0.5">
-              {mantenimientoAlDia} al día ({totalEquipos} tot.)
+            <div className="my-1.5">
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-2xl sm:text-3xl font-mono font-tabular font-black ${mantenimientoVencidos > 0 ? 'text-rose-400' : 'text-slate-200'}`}>
+                  {mantenimientoVencidos}
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 uppercase">venc.</span>
+                <span className="text-slate-600">/</span>
+                <span className={`text-lg sm:text-xl font-mono font-tabular font-bold ${mantenimientoProximos > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
+                  {mantenimientoProximos}
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 uppercase">próx.</span>
+              </div>
+            </div>
+            <span className="text-[10px] sm:text-[11px] font-mono text-slate-500 block">
+              {mantenimientoAlDia} al día ({totalEquipos} total)
             </span>
           </div>
         </ScrollReveal>
       </div>
 
-      {/* Tabs Navigation */}
+      {/* SECCIÓN: ATENCIÓN PRIORITARIA EN PLANTA */}
+      <ScrollReveal delay={100}>
+        <div className="bg-[#111724] border border-amber-500/30 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3.5">
+          <div className="flex items-center justify-between flex-wrap gap-2 border-b border-slate-800/80 pb-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center">
+                <ShieldAlert size={18} />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-black text-white flex items-center gap-2 tracking-wide uppercase">
+                  Atención Prioritaria en Planta
+                </h2>
+                <p className="text-[11px] font-mono text-slate-400">
+                  Equipos parados por falla técnica o con service vencido por horómetro
+                </p>
+              </div>
+            </div>
+
+            <span className={`px-2.5 py-1 rounded-full text-xs font-mono font-bold border ${
+              equiposAtencionPrioritaria.length > 0
+                ? 'bg-rose-950/80 text-rose-300 border-rose-600/60'
+                : 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
+            }`}>
+              {equiposAtencionPrioritaria.length > 0
+                ? `${equiposAtencionPrioritaria.length} Alertas Activas`
+                : 'Flota 100% OK'}
+            </span>
+          </div>
+
+          {equiposAtencionPrioritaria.length === 0 ? (
+            <div className="bg-[#0B0F17] border border-slate-800/80 rounded-xl p-4 flex items-center gap-3 text-emerald-400">
+              <CheckCircle2 size={22} className="shrink-0" />
+              <div className="text-xs">
+                <p className="font-bold text-white">Sin alertas críticas en planta</p>
+                <p className="font-mono text-slate-400">Todos los autoelevadores se encuentran operativos y con mantenimientos al día.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {equiposAtencionPrioritaria.map((eq) => {
+                const maint = calcularEstadoMantenimiento(eq.horometro_actual, eq.horometro_proximo_mantenimiento);
+                return (
+                  <div
+                    key={eq.id}
+                    className="bg-[#0B0F17] border border-rose-500/30 hover:border-rose-500/60 rounded-xl p-3.5 space-y-2.5 transition shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-700 flex items-center justify-center font-mono font-black text-amber-400 text-sm">
+                          {eq.interno}
+                        </span>
+                        <div>
+                          <h4 className="font-bold text-xs text-white">Interno #{eq.interno}</h4>
+                          <p className="text-[10px] font-mono text-slate-400">{eq.marca} {eq.modelo}</p>
+                        </div>
+                      </div>
+                      <StatusBadge estado={eq.estado} size="sm" />
+                    </div>
+
+                    <div className="bg-[#111724] p-2.5 rounded-lg border border-slate-800 flex items-center justify-between text-[11px] font-mono">
+                      <span className="text-slate-400">Estado Service:</span>
+                      <MantenimientoBadge
+                        horometroActual={eq.horometro_actual}
+                        proximoMantenimiento={eq.horometro_proximo_mantenimiento}
+                        size="sm"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-800/60">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setServiceModalEquipo(eq);
+                          setServiceIntervaloInput((eq.intervalo_mantenimiento_horas || 250).toString());
+                        }}
+                        className="btn-tactile px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 font-mono font-bold text-[11px] rounded-lg transition border border-amber-500/30 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Wrench size={12} />
+                        <span>Service</span>
+                      </button>
+
+                      <Link
+                        href={`/equipo/${eq.qr_codigo}`}
+                        className="text-[11px] font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                      >
+                        <span>Ficha</span>
+                        <ExternalLink size={11} />
+                      </Link>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </ScrollReveal>
+
+      {/* Tabs Navigation Rediseñadas */}
       <ScrollReveal delay={150}>
-        <div className="flex border-b border-slate-800 gap-2 sm:gap-4 overflow-x-auto scrollbar-none -webkit-overflow-scrolling-touch">
+        <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-1.5 flex gap-1.5 overflow-x-auto scrollbar-none -webkit-overflow-scrolling-touch">
           <button
             onClick={() => setActiveTab('flota')}
-            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+            className={`btn-tactile flex-1 min-w-[130px] py-2.5 px-3 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap border ${
               activeTab === 'flota'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-900/60'
             }`}
           >
-            <Truck size={16} />
+            <Truck size={15} />
             <span>Flota ({equipos.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('fallas')}
-            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+            className={`btn-tactile flex-1 min-w-[130px] py-2.5 px-3 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap border ${
               activeTab === 'fallas'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-900/60'
             }`}
           >
-            <AlertOctagon size={16} />
+            <AlertOctagon size={15} />
             <span>Fallas ({fallas.length})</span>
             {fallasPendientes > 0 && (
-              <span className="px-1.5 py-0.5 bg-rose-950/90 text-rose-200 border border-rose-500/70 rounded text-[10px] font-mono font-bold">
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                activeTab === 'fallas'
+                  ? 'bg-slate-950 text-amber-300'
+                  : 'bg-rose-950/90 text-rose-200 border border-rose-500/70'
+              }`}>
                 {fallasPendientes}
               </span>
             )}
@@ -538,25 +679,25 @@ export default function SupervisorDashboardPage() {
 
           <button
             onClick={() => setActiveTab('historial')}
-            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+            className={`btn-tactile flex-1 min-w-[140px] py-2.5 px-3 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap border ${
               activeTab === 'historial'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-900/60'
             }`}
           >
-            <ClipboardList size={16} />
-            <span>Historial TPM ({inspecciones.length})</span>
+            <ClipboardList size={15} />
+            <span>Historial ({inspecciones.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('operadores')}
-            className={`pb-3 px-2 font-mono font-bold text-xs sm:text-sm uppercase tracking-wider transition flex items-center gap-2 border-b-2 cursor-pointer whitespace-nowrap ${
+            className={`btn-tactile flex-1 min-w-[140px] py-2.5 px-3 rounded-xl font-mono font-bold text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap border ${
               activeTab === 'operadores'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
+                ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md shadow-amber-500/20'
+                : 'bg-transparent text-slate-400 border-transparent hover:text-slate-200 hover:bg-slate-900/60'
             }`}
           >
-            <QrCode size={16} />
+            <QrCode size={15} />
             <span>Credenciales QR</span>
           </button>
         </div>
@@ -687,8 +828,8 @@ export default function SupervisorDashboardPage() {
                         </div>
                       </div>
 
-                      {/* Actions bar */}
-                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                      {/* Actions bar con jerarquía clara */}
+                      <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-800/80">
                         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                           {!eq.deleted_at && (
                             <button
@@ -699,10 +840,10 @@ export default function SupervisorDashboardPage() {
                                   (eq.intervalo_mantenimiento_horas || 250).toString()
                                 );
                               }}
-                              className="btn-tactile px-2.5 py-1.5 bg-amber-950/60 hover:bg-amber-950/90 text-amber-400 font-mono font-bold text-xs rounded transition flex items-center gap-1.5 border border-amber-500/40 cursor-pointer"
+                              className="btn-tactile px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-xs rounded-xl transition flex items-center gap-1.5 shadow-md shadow-amber-500/20 active:scale-[0.98] cursor-pointer"
                               title="Registrar mantenimiento preventivo realizado"
                             >
-                              <Wrench size={13} className="text-amber-400" />
+                              <Wrench size={13} className="shrink-0" />
                               <span>Service</span>
                             </button>
                           )}
@@ -710,10 +851,10 @@ export default function SupervisorDashboardPage() {
                           <button
                             type="button"
                             onClick={() => setPrintQrEquipo(eq)}
-                            className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                            className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
                             title="Ver y Descargar Código QR"
                           >
-                            <QrCode size={13} className="text-amber-400" />
+                            <QrCode size={13} className="text-amber-400 shrink-0" />
                             <span>Placa QR</span>
                           </button>
 
@@ -721,10 +862,10 @@ export default function SupervisorDashboardPage() {
                             <button
                               type="button"
                               onClick={() => setEditEquipo(eq)}
-                              className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-200 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                              className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
                               title="Editar datos técnicos"
                             >
-                              <Edit2 size={13} className="text-slate-400" />
+                              <Edit2 size={13} className="text-slate-400 shrink-0" />
                               <span>Editar</span>
                             </button>
                           )}
@@ -733,17 +874,17 @@ export default function SupervisorDashboardPage() {
                             <button
                               type="button"
                               onClick={() => handleReactivarEquipo(eq)}
-                              className="btn-tactile px-2.5 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 font-mono font-bold text-xs rounded-lg transition flex items-center gap-1.5 border border-emerald-500/50 cursor-pointer"
+                              className="btn-tactile px-2.5 py-1.5 bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-300 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-emerald-500/50 cursor-pointer"
                               title="Reactivar equipo dado de baja"
                             >
-                              <RefreshCw size={13} className="text-emerald-400" />
+                              <RefreshCw size={13} className="text-emerald-400 shrink-0" />
                               <span>Reactivar</span>
                             </button>
                           ) : (
                             <button
                               type="button"
                               onClick={() => setDeleteConfirmEquipo(eq)}
-                              className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                              className="p-2 text-slate-500 hover:text-rose-400 rounded-xl hover:bg-slate-800 transition cursor-pointer"
                               title="Dar de baja equipo (Soft Delete)"
                             >
                               <Trash2 size={14} />
@@ -753,9 +894,9 @@ export default function SupervisorDashboardPage() {
 
                         <Link
                           href={`/equipo/${eq.qr_codigo}`}
-                          className="text-xs font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1"
+                          className="btn-tactile px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-amber-500/40 shrink-0"
                         >
-                          <span>Ficha Técnica</span>
+                          <span>Ficha</span>
                           <ExternalLink size={12} />
                         </Link>
                       </div>

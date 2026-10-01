@@ -42,6 +42,7 @@ import {
   Sparkles,
   CheckCircle2,
   Users,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -55,6 +56,8 @@ export default function HomePage() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [operatorScannerOpen, setOperatorScannerOpen] = useState(false);
   const [selectedQrEquipo, setSelectedQrEquipo] = useState<Equipo | null>(null);
+  const [signingInId, setSigningInId] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -103,6 +106,7 @@ export default function HomePage() {
     );
 
     const targetCode = match ? match.qr_codigo : cleanCode;
+    setIsSearching(true);
     router.push(`/equipo/${encodeURIComponent(targetCode)}`);
   };
 
@@ -118,11 +122,14 @@ export default function HomePage() {
   };
 
   const handleQuickSelectOperator = async (op: Perfil) => {
+    if (signingInId) return;
+
     if (perfil?.id === op.id) {
       toast.info(`Ya estás operando como ${op.nombre}`);
       return;
     }
 
+    setSigningInId(op.id);
     toast.loading(`Iniciando sesión como ${op.nombre}...`);
     try {
       const res = await quickSignInOperator(op);
@@ -145,6 +152,8 @@ export default function HomePage() {
     } catch (err: any) {
       toast.dismiss();
       toast.error(err?.message || 'Error al seleccionar operador');
+    } finally {
+      setSigningInId(null);
     }
   };
 
@@ -331,10 +340,20 @@ export default function HomePage() {
             </div>
             <button
               type="submit"
-              className="py-3 px-5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer btn-tactile"
+              disabled={isSearching}
+              className="py-3 px-5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs sm:text-sm rounded-xl transition flex items-center justify-center gap-1.5 border border-slate-700 cursor-pointer btn-tactile disabled:opacity-60 disabled:cursor-not-allowed min-w-[130px]"
             >
-              <span>Buscar Ficha</span>
-              <ArrowRight size={14} />
+              {isSearching ? (
+                <>
+                  <Loader2 size={14} className="animate-spin text-amber-400" />
+                  <span>Buscando...</span>
+                </>
+              ) : (
+                <>
+                  <span>Buscar Ficha</span>
+                  <ArrowRight size={14} />
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -381,14 +400,17 @@ export default function HomePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
               {operadores.map((op, idx) => {
                 const isActive = perfil?.id === op.id;
+                const isSigningInThis = signingInId === op.id;
+                const isAnySigningIn = Boolean(signingInId);
 
                 return (
                   <ScrollReveal key={op.id} direction="up" delay={idx * 40}>
                     <button
                       type="button"
+                      disabled={isAnySigningIn}
                       onClick={() => handleQuickSelectOperator(op)}
                       title={`Ingresar como ${op.nombre}`}
-                      className={`w-full p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer btn-tactile group ${
+                      className={`w-full p-3 rounded-xl border text-left transition flex items-center justify-between gap-2.5 cursor-pointer btn-tactile group disabled:opacity-60 disabled:cursor-not-allowed ${
                         isActive
                           ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/40 shadow-xs'
                           : 'bg-slate-950/80 hover:bg-slate-900 border-slate-800 hover:border-amber-500/50'
@@ -420,7 +442,12 @@ export default function HomePage() {
                         </div>
                       </div>
 
-                      {isActive ? (
+                      {isSigningInThis ? (
+                        <span className="shrink-0 text-[11px] font-bold text-amber-400 flex items-center gap-1 font-mono">
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>Ingresando...</span>
+                        </span>
+                      ) : isActive ? (
                         <span className="shrink-0 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-950/80 text-emerald-300 border border-emerald-500/50 flex items-center gap-1">
                           <CheckCircle2 size={10} />
                           <span>Activo</span>

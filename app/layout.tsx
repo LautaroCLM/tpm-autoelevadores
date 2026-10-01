@@ -36,6 +36,7 @@ export const viewport: Viewport = {
 };
 
 import { AuthProvider } from '../components/AuthProvider';
+import { SplashScreen } from '../components/SplashScreen';
 
 export default function RootLayout({
   children,
@@ -46,6 +47,7 @@ export default function RootLayout({
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable} dark`}>
       <body className="bg-[#0b0f17] text-slate-100 min-h-dvh flex flex-col font-sans antialiased selection:bg-amber-500 selection:text-slate-950">
         <AuthProvider>
+          <SplashScreen />
           <OfflineIndicator />
           <Header />
           <main className="flex-1 flex flex-col">{children}</main>

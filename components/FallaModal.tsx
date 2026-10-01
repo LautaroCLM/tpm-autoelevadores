@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GravedadFalla } from '../lib/types/tpm';
 import { X, Camera, AlertTriangle, AlertOctagon, Info, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { compressImage } from '../lib/utils/imageCompression';
 import { ModalPortal } from './ModalPortal';
 
@@ -73,7 +74,7 @@ export const FallaModal: React.FC<FallaModalProps> = ({
 
   const handleSave = () => {
     if (!descripcion.trim()) {
-      alert('Por favor ingrese una breve descripción de la falla observada.');
+      toast.warning('Por favor ingrese una breve descripción de la falla observada.');
       return;
     }
     onSave({
