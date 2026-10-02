@@ -57,8 +57,8 @@ export default function EquipoFichaPage() {
       if (!qrCodigo || authLoading) return;
       setLoading(true);
       try {
-        if (!user) {
-          // No autenticado: preservar destino y redirigir a /login
+        if (!user && !perfil) {
+          // No autenticado ni operador activo: preservar destino y redirigir a /login
           const targetPath = `/equipo/${encodeURIComponent(qrCodigo)}`;
           router.replace(`/login?redirect=${encodeURIComponent(targetPath)}`);
           return;

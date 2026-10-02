@@ -2,6 +2,29 @@ import { createClient } from '../supabase/client';
 import { Perfil } from '../types/tpm';
 import { getTodayDateString, isAuthDateToday } from '../utils/auth-helpers';
 
+/**
+ * Obtiene la URL completa para llamadas a las API Routes de Next.js,
+ * soportando ejecuciones en navegadores web, Vercel y aplicaciones nativas Android / Capacitor.
+ */
+export function getApiUrl(path: string): string {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  if (typeof window !== 'undefined') {
+    const isCapacitor = Boolean(
+      (window as any).Capacitor?.isNativePlatform?.() ||
+        (window as any).Capacitor?.platform === 'android' ||
+        (window as any).Capacitor?.platform === 'ios'
+    );
+    const origin = window.location.origin;
+
+    if (isCapacitor || origin.startsWith('capacitor:') || origin.includes('localhost')) {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL || 'https://tpm-autoelevadores.vercel.app';
+      return `${baseUrl.replace(/\/$/, '')}${cleanPath}`;
+    }
+  }
+  return cleanPath;
+}
+
 export interface OperatorQRPayload {
   legajo: string;
   token: string;
@@ -204,6 +227,7 @@ export async function quickSignInOperator(op: Perfil): Promise<{
   if (!legajo) {
     recordLoginSessionDay();
     if (typeof window !== 'undefined') {
+      localStorage.setItem('tpm_active_operator', JSON.stringify(op));
       window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
     }
     return { success: true, perfil: op };
@@ -213,7 +237,8 @@ export async function quickSignInOperator(op: Perfil): Promise<{
     const isOffline = typeof window !== 'undefined' && !navigator.onLine;
 
     if (!isOffline) {
-      const res = await fetch('/api/auth/quick-operator-login', {
+      const apiUrl = getApiUrl('/api/auth/quick-operator-login');
+      const res = await fetch(apiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ legajo, profileId: op.id }),
@@ -228,27 +253,53 @@ export async function quickSignInOperator(op: Perfil): Promise<{
           });
 
           if (authRes.success) {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('tpm_active_operator', JSON.stringify(authRes.perfil || op));
+            }
             return {
               success: true,
               user: authRes.user,
               perfil: authRes.perfil || op,
             };
+          } else {
+            return {
+              success: false,
+              error: authRes.error || 'No se pudo crear la sesión para el operador seleccionado',
+            };
           }
+        } else {
+          return {
+            success: false,
+            error: data.error || 'Error en la respuesta de autenticación rápida',
+          };
         }
+      } else {
+        let errMessage = 'Error al comunicar con el servidor de autenticación';
+        try {
+          const errData = await res.json();
+          if (errData?.error) errMessage = errData.error;
+        } catch {
+          // Ignorar error de parseo
+        }
+        return {
+          success: false,
+          error: errMessage,
+        };
       }
     }
 
+    // Modo offline sin conexión a internet
     recordLoginSessionDay();
     if (typeof window !== 'undefined') {
+      localStorage.setItem('tpm_active_operator', JSON.stringify(op));
       window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
     }
     return { success: true, perfil: op };
-  } catch {
-    recordLoginSessionDay();
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-    }
-    return { success: true, perfil: op };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err?.message || 'Error de red durante el inicio de sesión rápido',
+    };
   }
 }
 
@@ -283,6 +334,20 @@ export async function getCurrentSessionAndProfile(): Promise<{
   try {
     const { data: authData } = await supabase.auth.getUser();
     if (!authData?.user) {
+      // Fallback para modo offline u operador activo local
+      if (typeof window !== 'undefined') {
+        const storedActiveOp = localStorage.getItem('tpm_active_operator');
+        if (storedActiveOp) {
+          try {
+            const parsedOp = JSON.parse(storedActiveOp);
+            if (parsedOp && parsedOp.id) {
+              return { user: null, perfil: parsedOp };
+            }
+          } catch {
+            // Ignorar error de JSON
+          }
+        }
+      }
       return { user: null, perfil: null };
     }
 
@@ -315,6 +380,10 @@ export async function getCurrentSessionAndProfile(): Promise<{
       created_at: authData.user.created_at || new Date().toISOString(),
     };
 
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('tpm_active_operator', JSON.stringify(perfil));
+    }
+
     return { user: authData.user, perfil };
   } catch {
     return { user: null, perfil: null };
@@ -327,6 +396,9 @@ export async function getCurrentSessionAndProfile(): Promise<{
 export async function signOutUser(): Promise<void> {
   const supabase = createClient();
   clearLoginSessionDay();
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('tpm_active_operator');
+  }
   await supabase.auth.signOut();
 }
 
@@ -454,7 +526,7 @@ export async function fetchOperadores(): Promise<Perfil[]> {
       // Fallback a API route de Next.js si la política RLS en Supabase aún no fue aplicada
       if (typeof window !== 'undefined') {
         try {
-          const res = await fetch('/api/operadores');
+          const res = await fetch(getApiUrl('/api/operadores'));
           if (res.ok) {
             const fallbackData = await res.json();
             if (Array.isArray(fallbackData) && fallbackData.length > 0) {
@@ -478,7 +550,7 @@ export async function fetchOperadores(): Promise<Perfil[]> {
 
     if (typeof window !== 'undefined') {
       try {
-        const res = await fetch('/api/operadores');
+        const res = await fetch(getApiUrl('/api/operadores'));
         if (res.ok) {
           const fallbackData = await res.json();
           if (Array.isArray(fallbackData) && fallbackData.length > 0) {

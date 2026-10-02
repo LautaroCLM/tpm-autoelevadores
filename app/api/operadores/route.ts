@@ -3,6 +3,26 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+};
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders,
+  });
+}
+
+function jsonResponse(data: any, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: corsHeaders,
+  });
+}
+
 export async function GET() {
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -10,7 +30,7 @@ export async function GET() {
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !serviceKey) {
-      return NextResponse.json({ error: 'Supabase credentials missing' }, { status: 500 });
+      return jsonResponse({ error: 'Supabase credentials missing' }, 500);
     }
 
     const supabase = createClient(url, serviceKey, {
@@ -24,11 +44,11 @@ export async function GET() {
       .order('nombre', { ascending: true });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return jsonResponse({ error: error.message }, 500);
     }
 
-    return NextResponse.json(data || []);
+    return jsonResponse(data || []);
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Error interno' }, { status: 500 });
+    return jsonResponse({ error: err?.message || 'Error interno' }, 500);
   }
 }
