@@ -121,7 +121,7 @@ export default function InspeccionChecklistPage() {
       if (!equipoId || authLoading) return;
       setLoading(true);
       try {
-        if (!user && !perfil) {
+        if (!user) {
           toast.error('Debe iniciar sesión para realizar la inspección');
           const currentUrl = window.location.pathname + window.location.search;
           router.replace(`/login?redirect=${encodeURIComponent(currentUrl)}`);
@@ -321,7 +321,7 @@ export default function InspeccionChecklistPage() {
       return;
     }
 
-    let finalOperadorId = user?.id || perfil?.id || '';
+    let finalOperadorId = user?.id || '';
     if (!finalOperadorId) {
       toast.error('Sesión no válida o caducada. Por favor inicie sesión nuevamente.');
       const currentUrl = window.location.pathname + window.location.search;

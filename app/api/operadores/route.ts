@@ -3,34 +3,52 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-};
+function getCorsHeaders(req?: Request) {
+  const requestOrigin = req?.headers.get('origin') || '';
+  const allowedOrigins = [
+    'https://tpm-autoelevadores.vercel.app',
+    'http://localhost',
+    'capacitor://localhost',
+  ];
 
-export async function OPTIONS() {
+  let origin = '*';
+  if (requestOrigin) {
+    const isAllowed = allowedOrigins.some((allowed) => requestOrigin.startsWith(allowed));
+    if (isAllowed || requestOrigin.includes('localhost') || requestOrigin.startsWith('capacitor:')) {
+      origin = requestOrigin;
+    }
+  }
+
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Credentials': 'true',
+  };
+}
+
+export async function OPTIONS(req: Request) {
   return new NextResponse(null, {
     status: 200,
-    headers: corsHeaders,
+    headers: getCorsHeaders(req),
   });
 }
 
-function jsonResponse(data: any, status = 200) {
+function jsonResponse(data: any, req: Request, status = 200) {
   return NextResponse.json(data, {
     status,
-    headers: corsHeaders,
+    headers: getCorsHeaders(req),
   });
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const serviceKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
     if (!url || !serviceKey) {
-      return jsonResponse({ error: 'Supabase credentials missing' }, 500);
+      return jsonResponse({ error: 'Supabase credentials missing' }, req, 500);
     }
 
     const supabase = createClient(url, serviceKey, {
@@ -44,11 +62,11 @@ export async function GET() {
       .order('nombre', { ascending: true });
 
     if (error) {
-      return jsonResponse({ error: error.message }, 500);
+      return jsonResponse({ error: error.message }, req, 500);
     }
 
-    return jsonResponse(data || []);
+    return jsonResponse(data || [], req);
   } catch (err: any) {
-    return jsonResponse({ error: err?.message || 'Error interno' }, 500);
+    return jsonResponse({ error: err?.message || 'Error interno' }, req, 500);
   }
 }

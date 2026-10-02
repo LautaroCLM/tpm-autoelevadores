@@ -3,23 +3,41 @@ import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-};
+function getCorsHeaders(req?: Request) {
+  const requestOrigin = req?.headers.get('origin') || '';
+  const allowedOrigins = [
+    'https://tpm-autoelevadores.vercel.app',
+    'http://localhost',
+    'capacitor://localhost',
+  ];
 
-export async function OPTIONS() {
+  let origin = '*';
+  if (requestOrigin) {
+    const isAllowed = allowedOrigins.some((allowed) => requestOrigin.startsWith(allowed));
+    if (isAllowed || requestOrigin.includes('localhost') || requestOrigin.startsWith('capacitor:')) {
+      origin = requestOrigin;
+    }
+  }
+
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Credentials': 'true',
+  };
+}
+
+export async function OPTIONS(req: Request) {
   return new NextResponse(null, {
     status: 200,
-    headers: corsHeaders,
+    headers: getCorsHeaders(req),
   });
 }
 
-function jsonResponse(data: any, status = 200) {
+function jsonResponse(data: any, req: Request, status = 200) {
   return NextResponse.json(data, {
     status,
-    headers: corsHeaders,
+    headers: getCorsHeaders(req),
   });
 }
 
@@ -30,7 +48,7 @@ export async function POST(req: Request) {
     const profileId = body?.profileId;
 
     if (!legajo) {
-      return jsonResponse({ error: 'Legajo requerido' }, 400);
+      return jsonResponse({ error: 'Legajo requerido' }, req, 400);
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -45,6 +63,7 @@ export async function POST(req: Request) {
           error:
             'SUPABASE_SERVICE_ROLE_KEY no está configurada en las variables de entorno de Vercel/Servidor. Configúrela en Vercel > Project Settings > Environment Variables.',
         },
+        req,
         500
       );
     }
@@ -57,41 +76,32 @@ export async function POST(req: Request) {
     const email = `op_${cleanLegajo}@tpmplanta.com`;
     const tempPassword = `op_pass_${cleanLegajo}_${Date.now()}`;
 
+    // 1. VALIDACIÓN DE SEGURIDAD ESTRICTA: El operador DEBE existir previamente en la tabla public.perfiles
+    const { data: perfilExistente, error: perfilErr } = await supabaseAdmin
+      .from('perfiles')
+      .select('id, nombre, legajo, rol')
+      .eq('legajo', cleanLegajo)
+      .eq('rol', 'operador')
+      .maybeSingle();
+
+    if (perfilErr || !perfilExistente) {
+      // Rechazar legajos arbitrarios o no registrados para evitar creación de cuentas no autorizadas
+      return jsonResponse({ error: 'Operador no registrado en el sistema de planta' }, req, 404);
+    }
+
     let targetUser: any = null;
 
-    // 1. Intentar buscar por profileId si fue provisto
-    if (profileId) {
-      try {
-        const { data: userById } = await supabaseAdmin.auth.admin.getUserById(profileId);
-        if (userById?.user) {
-          targetUser = userById.user;
-        }
-      } catch {
-        // Continuar si falla
+    // 2. Buscar si el usuario ya existe en Supabase Auth por el UUID exacto de su perfil
+    try {
+      const { data: userById } = await supabaseAdmin.auth.admin.getUserById(perfilExistente.id);
+      if (userById?.user) {
+        targetUser = userById.user;
       }
+    } catch {
+      // Ignorar error y continuar a búsqueda por email
     }
 
-    // 2. Si no se encontró por ID, buscar en public.perfiles por legajo para obtener el UUID exacto
-    if (!targetUser) {
-      const { data: perfilData } = await supabaseAdmin
-        .from('perfiles')
-        .select('id, nombre, legajo')
-        .eq('legajo', cleanLegajo)
-        .maybeSingle();
-
-      if (perfilData?.id) {
-        try {
-          const { data: userByPerfilId } = await supabaseAdmin.auth.admin.getUserById(perfilData.id);
-          if (userByPerfilId?.user) {
-            targetUser = userByPerfilId.user;
-          }
-        } catch {
-          // Continuar
-        }
-      }
-    }
-
-    // 3. Fallback: buscar en listUsers de Supabase Auth por email o legajo en metadata
+    // 3. Si no se encontró por ID de perfil, buscar por email en auth.users
     if (!targetUser) {
       const { data: usersData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({
         page: 1,
@@ -103,29 +113,19 @@ export async function POST(req: Request) {
           (u) =>
             u.email?.toLowerCase() === email.toLowerCase() ||
             u.id === profileId ||
-            u.user_metadata?.legajo === cleanLegajo ||
-            u.user_metadata?.legajo === legajo
+            u.user_metadata?.legajo === cleanLegajo
         );
       }
     }
 
-    // 4. Si aún no existe el usuario en Auth, auto-provisionarlo en Supabase Auth
+    // 4. Si el operador legalmente registrado en public.perfiles aún no tiene cuenta en Auth, asociarla de forma segura
     if (!targetUser) {
-      // Buscar información en perfiles
-      const { data: perfilInfo } = await supabaseAdmin
-        .from('perfiles')
-        .select('nombre, legajo')
-        .eq('legajo', cleanLegajo)
-        .maybeSingle();
-
-      const nombreOperador = perfilInfo?.nombre || `Operador Legajo ${cleanLegajo}`;
-
       const { data: createdAuth, error: createErr } = await supabaseAdmin.auth.admin.createUser({
         email,
         password: tempPassword,
         email_confirm: true,
         user_metadata: {
-          nombre: nombreOperador,
+          nombre: perfilExistente.nombre,
           legajo: cleanLegajo,
           rol: 'operador',
         },
@@ -133,40 +133,36 @@ export async function POST(req: Request) {
 
       if (createErr || !createdAuth?.user) {
         return jsonResponse(
-          { error: createErr?.message || 'No se pudo registrar el usuario operador en Auth' },
+          { error: createErr?.message || 'No se pudo sincronizar la cuenta de autenticación del operador' },
+          req,
           500
         );
       }
 
       targetUser = createdAuth.user;
 
-      // Garantizar que la tabla public.perfiles quede sincronizada con el nuevo UUID
-      await supabaseAdmin.from('perfiles').upsert(
-        {
-          id: targetUser.id,
-          nombre: nombreOperador,
-          legajo: cleanLegajo,
-          rol: 'operador',
-        },
-        { onConflict: 'id' }
-      );
+      // Actualizar el ID en public.perfiles para mantener consistencia 1:1 de UUID
+      await supabaseAdmin.from('perfiles').update({ id: targetUser.id }).eq('legajo', cleanLegajo);
     }
 
-    // 5. Actualizar la contraseña del usuario a la clave temporal
+    // 5. Establecer la contraseña temporal de un solo uso para que el cliente realice signInWithPassword
     const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(targetUser.id, {
       password: tempPassword,
     });
 
     if (updateErr) {
-      return jsonResponse({ error: updateErr.message }, 500);
+      return jsonResponse({ error: updateErr.message }, req, 500);
     }
 
-    return jsonResponse({
-      success: true,
-      email: targetUser.email || email,
-      password: tempPassword,
-    });
+    return jsonResponse(
+      {
+        success: true,
+        email: targetUser.email || email,
+        password: tempPassword,
+      },
+      req
+    );
   } catch (err: any) {
-    return jsonResponse({ error: err?.message || 'Error interno del servidor' }, 500);
+    return jsonResponse({ error: err?.message || 'Error interno del servidor' }, req, 500);
   }
 }
