@@ -229,7 +229,7 @@ export default function MiPerfilPage() {
                       required
                       value={formNombre}
                       onChange={(e) => setFormNombre(e.target.value)}
-                      placeholder="Ej: Juan Pérez"
+                      placeholder="Ej: Macri Eduardo"
                       className="w-full px-3.5 py-3 bg-[#0B0F17] border border-amber-500/60 rounded-xl text-base sm:text-sm text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400 transition font-medium"
                       autoFocus
                     />

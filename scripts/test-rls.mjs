@@ -10,7 +10,7 @@ async function runAudit() {
   console.log('🧪 VERIFICACIÓN EN VIVO DE POLÍTICAS RLS (SUPABASE)');
   console.log('================================================================\n');
 
-  // 1. Prueba como Operador (Juan Pérez)
+  // 1. Prueba como Operador (Macri Eduardo)
   const opTestEmail = process.env.TEST_OPERATOR_EMAIL || (env.match(/TEST_OPERATOR_EMAIL=(.*)/)?.[1]?.trim()) || 'op_4029@tpmplanta.com';
   const opTestPassword = process.env.TEST_OPERATOR_PASSWORD || (env.match(/TEST_OPERATOR_PASSWORD=(.*)/)?.[1]?.trim());
 
@@ -29,7 +29,7 @@ async function runAudit() {
     console.error('❌ Error al iniciar sesión como operador:', authOp.error?.message);
     return;
   }
-  console.log('👤 Sesión iniciada como OPERADOR: Juan Pérez (UID:', authOp.data.user.id + ')\n');
+  console.log('👤 Sesión iniciada como OPERADOR: Macri Eduardo (UID:', authOp.data.user.id + ')\n');
 
   // Test A: Operador intenta UPDATE en equipos
   console.log('1. Probando UPDATE en equipos como Operador...');

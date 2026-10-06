@@ -1098,25 +1098,25 @@ export default function SupervisorDashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
               {[
                 {
-                  nombre: 'Juan Pérez',
+                  nombre: 'Macri Eduardo',
                   legajo: '4029',
                   codigoQR: 'TPM:OP:4029',
                   rol: 'Operador Turno Mañana',
                 },
                 {
-                  nombre: 'Carlos Gómez',
+                  nombre: 'Cervantes Diego',
                   legajo: '5118',
                   codigoQR: 'TPM:OP:5118',
                   rol: 'Operador Turno Tarde',
                 },
                 {
-                  nombre: 'Lucas Martínez',
+                  nombre: 'Casal Gustavo',
                   legajo: '2045',
                   codigoQR: 'TPM:OP:2045',
                   rol: 'Operador Turno Rotativo',
                 },
                 {
-                  nombre: 'Martín Rodríguez',
+                  nombre: 'Lavin Leo',
                   legajo: '3082',
                   codigoQR: 'TPM:OP:3082',
                   rol: 'Operador Turno Noche',

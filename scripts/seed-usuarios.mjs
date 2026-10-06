@@ -77,31 +77,31 @@ function resolveUserPassword(user) {
 const RAW_USERS = [
   {
     email: 'op_4029@tpmplanta.com',
-    nombre: 'Juan Pérez',
+    nombre: 'Macri Eduardo',
     legajo: '4029',
     rol: 'operador',
   },
   {
     email: 'op_5118@tpmplanta.com',
-    nombre: 'Carlos Gómez',
+    nombre: 'Cervantes Diego',
     legajo: '5118',
     rol: 'operador',
   },
   {
     email: 'op_2045@tpmplanta.com',
-    nombre: 'Lucas Martínez',
+    nombre: 'Casal Gustavo',
     legajo: '2045',
     rol: 'operador',
   },
   {
     email: 'op_3082@tpmplanta.com',
-    nombre: 'Martín Rodríguez',
+    nombre: 'Lavin Leo',
     legajo: '3082',
     rol: 'operador',
   },
   {
     email: 'supervisor@tpm.com',
-    nombre: 'Ing. Marcos Rivas',
+    nombre: 'Ruben Orlando Colman',
     legajo: 'SUP-01',
     rol: 'supervisor',
   },
