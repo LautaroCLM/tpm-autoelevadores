@@ -18,6 +18,9 @@ import {
   getMockInspeccionesByEquipo,
   getMockFallas,
   updateMockFallaEstado,
+  archivarMockFalla,
+  restaurarMockFalla,
+  eliminarMockFallaDefinitiva,
 } from '../data/mock-db';
 import { enqueueInspeccion } from '../offline/queue';
 import {
@@ -31,27 +34,35 @@ import {
 import { extractEquipoCode } from '../utils/auth-helpers';
 
 function isSupabaseConfigured(): boolean {
+  if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+    return false;
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   return Boolean(url && key && !url.includes('placeholder') && !key.includes('placeholder'));
 }
 
+/**
+ * IMPORTANTE: los datos de demostración (mock-db) solo se usan cuando Supabase NO está
+ * configurado (desarrollo local o NEXT_PUBLIC_USE_MOCK=true). Con Supabase configurado jamás
+ * se muestran equipos de ejemplo: ante un error o sin conexión se usa la caché local del
+ * dispositivo y, si no hay, un resultado vacío. Así nadie inspecciona un equipo que no existe.
+ */
 export async function fetchEquipos(incluirDadosDeBaja = false): Promise<Equipo[]> {
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-  if (isOffline) {
-    const cached = await getCachedEquipos();
-    if (cached && cached.length > 0) {
-      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-    }
-    const mock = await getMockEquipos();
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
-  }
+  const aplicarFiltro = (lista: Equipo[]) =>
+    incluirDadosDeBaja ? lista : lista.filter((e) => !e.deleted_at);
 
   if (!isSupabaseConfigured()) {
     const mock = await getMockEquipos();
     saveEquiposCache(mock.filter((e) => !e.deleted_at)).catch(() => {});
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+    return aplicarFiltro(mock);
+  }
+
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const desdeCache = async () => aplicarFiltro((await getCachedEquipos().catch(() => [])) || []);
+
+  if (isOffline) {
+    return await desdeCache();
   }
 
   try {
@@ -68,37 +79,20 @@ export async function fetchEquipos(incluirDadosDeBaja = false): Promise<Equipo[]
     const { data, error } = await query;
 
     if (error) {
-      const cached = await getCachedEquipos().catch(() => []);
-      if (cached && cached.length > 0) {
-        return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-      }
-      const mock = await getMockEquipos();
-      return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+      console.error('Error consultando equipos en Supabase:', error);
+      return await desdeCache();
     }
 
     const equipos = (data || []) as Equipo[];
-    if (equipos.length > 0) {
-      // Guardar en la caché local únicamente equipos activos para seguridad offline
-      const activos = equipos.filter((e) => !e.deleted_at);
-      saveEquiposCache(activos).catch((e) =>
-        console.warn('No se pudo guardar la caché de equipos:', e)
-      );
-      return equipos;
-    }
-
-    const cached = await getCachedEquipos().catch(() => []);
-    if (cached && cached.length > 0) {
-      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-    }
-    const mock = await getMockEquipos();
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+    // La respuesta del servidor es la verdad: si no hay equipos, no hay equipos.
+    // Se guarda en la caché local únicamente lo activo para uso offline.
+    saveEquiposCache(equipos.filter((e) => !e.deleted_at)).catch((e) =>
+      console.warn('No se pudo guardar la caché de equipos:', e)
+    );
+    return equipos;
   } catch (err: any) {
-    const cached = await getCachedEquipos().catch(() => []);
-    if (cached && cached.length > 0) {
-      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-    }
-    const mock = await getMockEquipos();
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+    console.error('Error de conexión consultando equipos:', err);
+    return await desdeCache();
   }
 }
 
@@ -106,16 +100,15 @@ export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> 
   const cleanCode = extractEquipoCode(qrCodigo);
   if (!cleanCode) return null;
 
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-  if (isOffline) {
-    const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
-    if (cached) return cached;
+  if (!isSupabaseConfigured()) {
     return await getMockEquipoByQR(cleanCode);
   }
 
-  if (!isSupabaseConfigured()) {
-    return await getMockEquipoByQR(cleanCode);
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const desdeCache = () => getCachedEquipoByQR(cleanCode).catch(() => null);
+
+  if (isOffline) {
+    return await desdeCache();
   }
 
   try {
@@ -126,33 +119,31 @@ export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> 
       .or(`qr_codigo.ilike.${cleanCode},interno.eq.${cleanCode}`)
       .maybeSingle();
 
-    if (error || !data) {
-      const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
-      if (cached) return cached;
-      return await getMockEquipoByQR(cleanCode);
+    if (error) {
+      console.error('Error consultando equipo por QR:', error);
+      return await desdeCache();
     }
 
-    return data as Equipo;
+    // Sin error y sin fila: el equipo no existe (no usar caché desactualizada ni datos de ejemplo)
+    return (data as Equipo | null) ?? null;
   } catch (err: any) {
-    const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
-    if (cached) return cached;
-    return await getMockEquipoByQR(cleanCode);
+    console.error('Error de conexión consultando equipo por QR:', err);
+    return await desdeCache();
   }
 }
 
 export async function fetchEquipoById(id: string): Promise<Equipo | null> {
   if (!id) return null;
 
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-  if (isOffline) {
-    const cached = await getCachedEquipoById(id).catch(() => null);
-    if (cached) return cached;
+  if (!isSupabaseConfigured()) {
     return await getMockEquipoById(id);
   }
 
-  if (!isSupabaseConfigured()) {
-    return await getMockEquipoById(id);
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const desdeCache = () => getCachedEquipoById(id).catch(() => null);
+
+  if (isOffline) {
+    return await desdeCache();
   }
 
   try {
@@ -163,17 +154,15 @@ export async function fetchEquipoById(id: string): Promise<Equipo | null> {
       .eq('id', id)
       .maybeSingle();
 
-    if (error || !data) {
-      const cached = await getCachedEquipoById(id).catch(() => null);
-      if (cached) return cached;
-      return await getMockEquipoById(id);
+    if (error) {
+      console.error('Error consultando equipo por ID:', error);
+      return await desdeCache();
     }
 
-    return data as Equipo;
+    return (data as Equipo | null) ?? null;
   } catch (err: any) {
-    const cached = await getCachedEquipoById(id).catch(() => null);
-    if (cached) return cached;
-    return await getMockEquipoById(id);
+    console.error('Error de conexión consultando equipo por ID:', err);
+    return await desdeCache();
   }
 }
 
@@ -318,7 +307,22 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
         error: 'Sesión no válida o expirada. Inicie sesión nuevamente.',
       };
     }
-    payload.operador_id = authData.user.id;
+
+    // Salvaguarda contra cambio de operador con inspecciones pendientes en cola:
+    // Si la inspección encolada offline ya pertenecía a otro operador, evitar sobreescribir la autoría
+    if (payload.operador_id && payload.operador_id !== authData.user.id) {
+      const userRole = authData.user.user_metadata?.rol;
+      const isSupervisor = userRole === 'supervisor' || userRole === 'mantenimiento';
+      if (!isSupervisor) {
+        return {
+          success: false,
+          queuedOffline: false,
+          error: 'Esta inspección pendiente pertenece a otro operador. Inicie sesión con el usuario correspondiente para sincronizarla.',
+        };
+      }
+    }
+
+    payload.operador_id = payload.operador_id || authData.user.id;
 
     // 1. Subir fotos de fallas a Supabase Storage con paths deterministas antes del RPC
     const rpcRespuestas = [];
@@ -531,16 +535,33 @@ export async function fetchInspeccionesByEquipo(equipoId: string): Promise<Inspe
 }
 
 
-export async function fetchFallas(): Promise<Falla[]> {
+export function extractStoragePathFromUrl(url: string | null): string | null {
+  if (!url || typeof url !== 'string' || !url.trim()) return null;
+  const prefix = '/fallas-fotos/';
+  const pos = url.indexOf(prefix);
+  if (pos !== -1) {
+    return url.substring(pos + prefix.length);
+  }
+  return url.trim();
+}
+
+export async function fetchFallas(incluirArchivadas = false): Promise<Falla[]> {
   if (!isSupabaseConfigured()) {
-    return await getMockFallas();
+    const mock = await getMockFallas();
+    return incluirArchivadas ? mock : mock.filter((f) => !f.deleted_at);
   }
 
   const supabase = createClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from('fallas')
     .select('*')
     .order('created_at', { ascending: false });
+
+  if (!incluirArchivadas) {
+    query = query.is('deleted_at', null);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Error fetching fallas from Supabase:', error);
@@ -548,6 +569,180 @@ export async function fetchFallas(): Promise<Falla[]> {
   }
 
   return (data || []) as Falla[];
+}
+
+export async function archivarFalla(fallaId: string): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    const success = await archivarMockFalla(fallaId);
+    return { success };
+  }
+
+  try {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any).rpc('archivar_falla_supervisor', {
+      p_falla_id: fallaId,
+    });
+
+    if (error) {
+      console.error('Error archivando falla en Supabase:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al archivar la falla' };
+  }
+}
+
+export async function restaurarFalla(fallaId: string): Promise<{ success: boolean; error?: string }> {
+  if (!isSupabaseConfigured()) {
+    const success = await restaurarMockFalla(fallaId);
+    return { success };
+  }
+
+  try {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any).rpc('restaurar_falla_supervisor', {
+      p_falla_id: fallaId,
+    });
+
+    if (error) {
+      console.error('Error restaurando falla en Supabase:', error);
+      return { success: false, error: error.message };
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error al restaurar la falla' };
+  }
+}
+
+export async function eliminarFallaDefinitiva(fallaId: string): Promise<{
+  success: boolean;
+  photoDeleted?: boolean;
+  purgaQueued?: boolean;
+  error?: string;
+}> {
+  if (!isSupabaseConfigured()) {
+    const success = await eliminarMockFallaDefinitiva(fallaId);
+    return { success, photoDeleted: true };
+  }
+
+  try {
+    const supabase = createClient();
+
+    // 1. Ejecutar RPC atómica que registra la purga en storage_purgas_pendientes y elimina la fila de fallas
+    const { data, error: rpcErr } = await (supabase as any).rpc('eliminar_falla_definitiva_supervisor', {
+      p_falla_id: fallaId,
+    });
+
+    if (rpcErr) {
+      console.error('Error al eliminar falla en PostgreSQL:', rpcErr);
+      return { success: false, error: rpcErr.message || 'Error al eliminar el registro en la base de datos' };
+    }
+
+    const res = data as { success: boolean; falla_id: string; foto_path?: string | null; purga_id?: string | null };
+    const fotoPath = res.foto_path;
+    const purgaId = res.purga_id;
+
+    let photoDeleted = false;
+    let purgaQueued = false;
+
+    // 2. Si la falla poseía fotografía y se registró la tarea de purga
+    if (fotoPath && purgaId) {
+      try {
+        const { error: storageErr } = await supabase.storage
+          .from('fallas-fotos')
+          .remove([fotoPath]);
+
+        if (!storageErr) {
+          photoDeleted = true;
+          // Marcar tarea de purga como completada
+          await (supabase as any).rpc('actualizar_estado_purga_foto', {
+            p_purga_id: purgaId,
+            p_estado: 'completado',
+          });
+        } else {
+          console.warn('Error al eliminar foto de Storage (quedó registrada en cola de purga):', storageErr);
+          purgaQueued = true;
+          await (supabase as any).rpc('actualizar_estado_purga_foto', {
+            p_purga_id: purgaId,
+            p_estado: 'fallido',
+            p_error: storageErr.message || 'Error de respuesta de Supabase Storage',
+          });
+        }
+      } catch (stEx: any) {
+        console.warn('Excepción procesando borrado en Storage (quedó registrada en cola de purga):', stEx);
+        purgaQueued = true;
+        await (supabase as any).rpc('actualizar_estado_purga_foto', {
+          p_purga_id: purgaId,
+          p_estado: 'fallido',
+          p_error: stEx?.message || 'Error de red al conectar con Storage',
+        }).catch(() => {});
+      }
+    }
+
+    return {
+      success: true,
+      photoDeleted,
+      purgaQueued,
+    };
+  } catch (err: any) {
+    console.error('Error en eliminarFallaDefinitiva:', err);
+    return { success: false, error: err?.message || 'Error inesperado al procesar la eliminación' };
+  }
+}
+
+export async function procesarPurgasPendientes(): Promise<{ procesadas: number; exitosas: number }> {
+  if (!isSupabaseConfigured()) {
+    return { procesadas: 0, exitosas: 0 };
+  }
+
+  try {
+    const supabase = createClient();
+    const { data: tareas, error: fetchErr } = await (supabase as any).rpc(
+      'obtener_purgas_pendientes_supervisor'
+    );
+
+    if (fetchErr || !tareas || !Array.isArray(tareas) || tareas.length === 0) {
+      return { procesadas: 0, exitosas: 0 };
+    }
+
+    let exitosas = 0;
+
+    for (const tarea of tareas) {
+      try {
+        const { error: storageErr } = await supabase.storage
+          .from(tarea.bucket_id || 'fallas-fotos')
+          .remove([tarea.file_path]);
+
+        if (!storageErr) {
+          exitosas++;
+          await (supabase as any).rpc('actualizar_estado_purga_foto', {
+            p_purga_id: tarea.id,
+            p_estado: 'completado',
+          });
+        } else {
+          await (supabase as any).rpc('actualizar_estado_purga_foto', {
+            p_purga_id: tarea.id,
+            p_estado: 'fallido',
+            p_error: storageErr.message,
+          });
+        }
+      } catch (err: any) {
+        await (supabase as any).rpc('actualizar_estado_purga_foto', {
+          p_purga_id: tarea.id,
+          p_estado: 'fallido',
+          p_error: err?.message || 'Error procesando purga',
+        }).catch(() => {});
+      }
+    }
+
+    return { procesadas: tareas.length, exitosas };
+  } catch (err) {
+    console.warn('Error al procesar purgas pendientes:', err);
+    return { procesadas: 0, exitosas: 0 };
+  }
 }
 
 export async function updateFallaEstado(
@@ -573,6 +768,7 @@ export async function updateFallaEstado(
 
   return true;
 }
+
 
 export async function createEquipo(equipoData: {
   interno: string;

@@ -21,3 +21,7 @@ supabase/.temp
 android/keystore/
 key.properties
 android/key.properties
+
+# Binarios de Android generados (no versionar)
+*.apk
+*.aab

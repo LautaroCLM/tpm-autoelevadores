@@ -37,6 +37,9 @@ export default function MiPerfilPage() {
   const [formLegajo, setFormLegajo] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // El legajo es el identificador de acceso: solo la supervisión puede cambiarlo
+  const puedeEditarLegajo = perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento';
+
   // QR Credencial
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [copiedId, setCopiedId] = useState(false);
@@ -83,7 +86,7 @@ export default function MiPerfilPage() {
     e.preventDefault();
 
     const cleanNombre = formNombre.trim();
-    const cleanLegajo = formLegajo.trim();
+    const cleanLegajo = puedeEditarLegajo ? formLegajo.trim() : (perfil?.legajo || '').trim();
 
     // 1. Validaciones requeridas
     if (!cleanNombre) {
@@ -212,7 +215,11 @@ export default function MiPerfilPage() {
             <div className="p-3 rounded-xl bg-[#0B0F17] border border-slate-800/90 flex items-start gap-2.5 text-xs text-slate-400">
               <AlertCircle size={16} className="text-amber-400 shrink-0 mt-0.5" />
               <p className="leading-relaxed font-medium">
-                Puedes actualizar tu <strong>Nombre</strong> y <strong>Legajo</strong>. Tu correo electrónico y rol de permisos son administrados por la supervisión de planta.
+                {puedeEditarLegajo ? (
+                  <>Puedes actualizar tu <strong>Nombre</strong> y <strong>Legajo</strong>. Tu correo electrónico y rol de permisos son administrados por la supervisión de planta.</>
+                ) : (
+                  <>Puedes actualizar tu <strong>Nombre</strong>. Tu legajo, PIN, correo y permisos los administra la supervisión de planta.</>
+                )}
               </p>
             </div>
 
@@ -246,9 +253,12 @@ export default function MiPerfilPage() {
               <div>
                 <label className="block text-[11px] font-mono font-bold uppercase tracking-wider text-slate-400 mb-1.5 flex items-center justify-between">
                   <span>N° de Legajo *</span>
-                  <span className="text-[10px] text-slate-500">Único de planta</span>
+                  <span className="text-[10px] text-slate-500 flex items-center gap-1">
+                    {!puedeEditarLegajo && <Lock size={10} />}
+                    {puedeEditarLegajo ? 'Único de planta' : 'Solo lectura'}
+                  </span>
                 </label>
-                {isEditing ? (
+                {isEditing && puedeEditarLegajo ? (
                   <div className="relative">
                     <input
                       type="text"
@@ -403,7 +413,7 @@ export default function MiPerfilPage() {
                   Código: TPM:OP:{perfil.legajo}
                 </p>
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Este código permite al escáner de la consola principal identificarte instantáneamente antes de iniciar una inspección.
+                  Al escanear este código, el terminal te identifica y te pide tu PIN. Para entrar sin PIN, pedile al supervisor tu tarjeta QR personal.
                 </p>
               </div>
             </div>

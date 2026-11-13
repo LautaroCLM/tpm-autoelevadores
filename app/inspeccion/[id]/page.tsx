@@ -139,6 +139,19 @@ export default function InspeccionChecklistPage() {
           fetchActiveChecklistTemplate(),
         ]);
 
+        // Un equipo dado de baja, o fuera de servicio, no admite nuevos checklists de operadores.
+        // Supervisión y mantenimiento sí pueden inspeccionarlo (p. ej. para rehabilitarlo).
+        const esSupervision = perfil?.rol === 'supervisor' || perfil?.rol === 'mantenimiento';
+        if (eqData && (eqData.deleted_at || (eqData.estado === 'fuera_de_servicio' && !esSupervision))) {
+          toast.error(
+            eqData.deleted_at
+              ? 'Este autoelevador fue dado de baja y no admite inspecciones.'
+              : 'Autoelevador fuera de servicio: no se puede iniciar el checklist. Avise a mantenimiento.'
+          );
+          router.replace(`/equipo/${encodeURIComponent(eqData.qr_codigo)}`);
+          return;
+        }
+
         if (eqData) setEquipo(eqData);
         if (tmplData) {
           setTemplate(tmplData.template);
@@ -438,8 +451,6 @@ export default function InspeccionChecklistPage() {
   }
 
   // PANTALLA DE ÉXITO AL FINALIZAR
-  // PANTALLA DE ÉXITO AL FINALIZAR
-  if (completedResult) {
   if (completedResult && equipo) {
     const isOfflineResult = completedResult.inspeccionId === 'offline-queued';
 
@@ -569,7 +580,6 @@ export default function InspeccionChecklistPage() {
         </div>
       </div>
     );
-  }
   }
 
   const handleBackClick = () => {

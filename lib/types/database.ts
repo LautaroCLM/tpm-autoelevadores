@@ -199,6 +199,7 @@ export type Database = {
           foto_url: string | null;
           detectado_por: string | null;
           estado_reparacion: 'pendiente' | 'en_revision' | 'reparando' | 'reparado' | 'cerrado';
+          deleted_at: string | null;
           created_at: string;
           resuelto_en: string | null;
         };
@@ -211,6 +212,7 @@ export type Database = {
           foto_url?: string | null;
           detectado_por?: string | null;
           estado_reparacion?: 'pendiente' | 'en_revision' | 'reparando' | 'reparado' | 'cerrado';
+          deleted_at?: string | null;
           created_at?: string;
           resuelto_en?: string | null;
         };
@@ -223,8 +225,47 @@ export type Database = {
           foto_url?: string | null;
           detectado_por?: string | null;
           estado_reparacion?: 'pendiente' | 'en_revision' | 'reparando' | 'reparado' | 'cerrado';
+          deleted_at?: string | null;
           created_at?: string;
           resuelto_en?: string | null;
+        };
+      };
+      storage_purgas_pendientes: {
+        Row: {
+          id: string;
+          bucket_id: string;
+          file_path: string;
+          falla_id: string | null;
+          estado: 'pendiente' | 'procesando' | 'completado' | 'fallido';
+          intentos: number;
+          ultimo_error: string | null;
+          creado_en: string;
+          ultimo_intento_en: string | null;
+          completado_en: string | null;
+        };
+        Insert: {
+          id?: string;
+          bucket_id?: string;
+          file_path: string;
+          falla_id?: string | null;
+          estado?: 'pendiente' | 'procesando' | 'completado' | 'fallido';
+          intentos?: number;
+          ultimo_error?: string | null;
+          creado_en?: string;
+          ultimo_intento_en?: string | null;
+          completado_en?: string | null;
+        };
+        Update: {
+          id?: string;
+          bucket_id?: string;
+          file_path?: string;
+          falla_id?: string | null;
+          estado?: 'pendiente' | 'procesando' | 'completado' | 'fallido';
+          intentos?: number;
+          ultimo_error?: string | null;
+          creado_en?: string;
+          ultimo_intento_en?: string | null;
+          completado_en?: string | null;
         };
       };
     };
@@ -241,6 +282,36 @@ export type Database = {
       is_supervisor_or_maint: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
+      };
+      archivar_falla_supervisor: {
+        Args: {
+          p_falla_id: string;
+        };
+        Returns: Json;
+      };
+      restaurar_falla_supervisor: {
+        Args: {
+          p_falla_id: string;
+        };
+        Returns: Json;
+      };
+      eliminar_falla_definitiva_supervisor: {
+        Args: {
+          p_falla_id: string;
+        };
+        Returns: Json;
+      };
+      actualizar_estado_purga_foto: {
+        Args: {
+          p_purga_id: string;
+          p_estado: string;
+          p_error?: string | null;
+        };
+        Returns: Json;
+      };
+      obtener_purgas_pendientes_supervisor: {
+        Args: Record<PropertyKey, never>;
+        Returns: Database['public']['Tables']['storage_purgas_pendientes']['Row'][];
       };
     };
     Enums: {

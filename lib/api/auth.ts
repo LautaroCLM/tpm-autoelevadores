@@ -1,5 +1,5 @@
 import { createClient } from '../supabase/client';
-import { Perfil } from '../types/tpm';
+import type { Perfil } from '../types/tpm';
 import { getTodayDateString, isAuthDateToday } from '../utils/auth-helpers';
 
 /**
@@ -15,8 +15,12 @@ export function getApiUrl(path: string): string {
         (window as any).Capacitor?.platform === 'ios'
     );
     const origin = window.location.origin;
+    // Solo los WebView nativos (sin puerto) necesitan apuntar al backend remoto.
+    // Un `next dev` en http://localhost:3000 debe usar sus propias API routes.
+    const isNativeWebViewOrigin =
+      origin.startsWith('capacitor:') || origin === 'https://localhost' || origin === 'http://localhost';
 
-    if (isCapacitor || origin.startsWith('capacitor:') || origin.includes('localhost')) {
+    if (isCapacitor || isNativeWebViewOrigin) {
       const baseUrl =
         process.env.NEXT_PUBLIC_APP_URL || 'https://tpm-autoelevadores.vercel.app';
       return `${baseUrl.replace(/\/$/, '')}${cleanPath}`;
@@ -189,117 +193,105 @@ export async function signInWithCredentials({
 
 /**
  * Inicia sesión como operador en Supabase Auth mediante el escaneo de su credencial QR.
+ * Si el QR contiene un token criptográfico independiente, se valida en el servidor sin exponer contraseñas.
+ * Si el QR solo contiene el legajo, se solicita el PIN personal del operario.
  */
 export async function signInOperatorWithQR(qrString: string): Promise<{
   success: boolean;
   user?: any;
   perfil?: Perfil;
   error?: string;
+  requiresPin?: boolean;
+  legajo?: string;
 }> {
   const { legajo, token } = parseOperatorQR(qrString);
   if (!legajo) {
     return { success: false, error: 'Código QR de credencial no válido' };
   }
 
-  if (!token) {
-    return {
-      success: false,
-      error: 'Credencial QR incompleta',
-    };
+  // Si incluye token criptográfico en el payload del QR (credencial autorizada)
+  if (token) {
+    return await loginOperadorViaServidor({ legajo, token }, 'Credencial QR no válida o revocada');
   }
 
-  return await signInWithCredentials({
-    identifier: `op_${legajo}@tpmplanta.com`,
-    password: token,
-  });
+  // Si es el formato estándar de credencial física de planta sin token (ej: "TPM:OP:4029" o legajo directo),
+  // el legajo es un identificador público. No se permite acceso anónimo automático sin validar identidad.
+  return {
+    success: false,
+    requiresPin: true,
+    legajo,
+    error: 'Credencial identificatoria detectada. Por favor ingrese su PIN o clave personal para autorizar la sesión.',
+  };
 }
 
 /**
  * Inicia sesión rápidamente como operador seleccionado desde los accesos rápidos de la planta.
+ * Exige la verificación de credencial (PIN / token) para evitar suplantaciones de identidad.
  */
-export async function quickSignInOperator(op: Perfil): Promise<{
+export async function quickSignInOperator(
+  op: Perfil,
+  pinOrToken?: string
+): Promise<{
   success: boolean;
   user?: any;
   perfil?: Perfil;
   error?: string;
+  requiresPin?: boolean;
 }> {
   const legajo = op.legajo;
   if (!legajo) {
-    recordLoginSessionDay();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('tpm_active_operator', JSON.stringify(op));
-      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-    }
-    return { success: true, perfil: op };
+    return { success: false, error: 'Operador sin legajo asignado' };
   }
 
-  try {
-    const isOffline = typeof window !== 'undefined' && !navigator.onLine;
-
-    if (!isOffline) {
-      const apiUrl = getApiUrl('/api/auth/quick-operator-login');
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ legajo, profileId: op.id }),
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success && data.email && data.password) {
-          const authRes = await signInWithCredentials({
-            identifier: data.email,
-            password: data.password,
-          });
-
-          if (authRes.success) {
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('tpm_active_operator', JSON.stringify(authRes.perfil || op));
-            }
-            return {
-              success: true,
-              user: authRes.user,
-              perfil: authRes.perfil || op,
-            };
-          } else {
-            return {
-              success: false,
-              error: authRes.error || 'No se pudo crear la sesión para el operador seleccionado',
-            };
-          }
-        } else {
-          return {
-            success: false,
-            error: data.error || 'Error en la respuesta de autenticación rápida',
-          };
-        }
-      } else {
-        let errMessage = 'Error al comunicar con el servidor de autenticación';
-        try {
-          const errData = await res.json();
-          if (errData?.error) errMessage = errData.error;
-        } catch {
-          // Ignorar error de parseo
-        }
-        return {
-          success: false,
-          error: errMessage,
-        };
-      }
-    }
-
-    // Modo offline sin conexión a internet
-    recordLoginSessionDay();
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('tpm_active_operator', JSON.stringify(op));
-      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
-    }
-    return { success: true, perfil: op };
-  } catch (err: any) {
+  if (!pinOrToken) {
     return {
       success: false,
-      error: err?.message || 'Error de red durante el inicio de sesión rápido',
+      requiresPin: true,
+      error: 'Se requiere ingresar el PIN de seguridad del operador para acceder.',
     };
+  }
+
+  // El PIN se valida en el servidor, que aplica limitación de intentos por IP y por legajo.
+  return await loginOperadorViaServidor(
+    { legajo, pin: pinOrToken.trim() },
+    'PIN o credencial de operador incorrecta'
+  );
+}
+
+/**
+ * Autentica a un operador contra /api/auth/quick-operator-login (PIN o token QR)
+ * e instala la sesión devuelta en el cliente de Supabase.
+ */
+async function loginOperadorViaServidor(
+  body: { legajo: string; pin?: string; token?: string },
+  fallbackError: string
+): Promise<{ success: boolean; user?: any; perfil?: Perfil; error?: string }> {
+  try {
+    const res = await fetch(getApiUrl('/api/auth/quick-operator-login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.success || !data.session) {
+      return { success: false, error: data.error || fallbackError };
+    }
+
+    const supabase = createClient();
+    const { error: sessionErr } = await supabase.auth.setSession(data.session);
+    if (sessionErr) {
+      return { success: false, error: 'No se pudo iniciar la sesión en este dispositivo' };
+    }
+
+    recordLoginSessionDay();
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('tpm_active_operator', JSON.stringify(data.perfil));
+      window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
+    }
+    return { success: true, user: data.user, perfil: data.perfil };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error de conexión al validar la credencial' };
   }
 }
 
@@ -329,6 +321,20 @@ export async function getCurrentSessionAndProfile(): Promise<{
   user: any | null;
   perfil: Perfil | null;
 }> {
+  if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+    const mockSupervisor: Perfil = {
+      id: 'mock-supervisor-id',
+      nombre: 'Supervisor de Prueba (Modo Mock)',
+      legajo: '9999',
+      rol: 'supervisor',
+      created_at: new Date().toISOString(),
+    };
+    return {
+      user: { id: 'mock-supervisor-id', email: 'supervisor@mock.local' },
+      perfil: mockSupervisor,
+    };
+  }
+
   const supabase = createClient();
 
   try {
@@ -394,11 +400,16 @@ export async function getCurrentSessionAndProfile(): Promise<{
  * Cierra la sesión activa en Supabase Auth y limpia la fecha diaria.
  */
 export async function signOutUser(): Promise<void> {
-  const supabase = createClient();
   clearLoginSessionDay();
   if (typeof window !== 'undefined') {
     localStorage.removeItem('tpm_active_operator');
   }
+
+  if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+    return;
+  }
+
+  const supabase = createClient();
   await supabase.auth.signOut();
 }
 
@@ -504,64 +515,45 @@ export async function updateUserProfile({
 }
 
 /**
- * Consulta la lista de operadores activos desde la tabla `perfiles` en Supabase.
+ * Lista de operadores para los botones de acceso rápido del terminal de planta.
+ *
+ * Usa el endpoint público mínimo /api/operadores (solo nombre y legajo), que funciona
+ * sin sesión. El `id` devuelto es sintético (`legajo:<n>`), solo sirve como clave de UI:
+ * compare operadores por `legajo`, nunca por `id`.
  */
 export async function fetchOperadores(): Promise<Perfil[]> {
+  const toPerfil = (op: { nombre: string; legajo: string | null }): Perfil => ({
+    id: `legajo:${op.legajo}`,
+    nombre: op.nombre,
+    legajo: op.legajo,
+    rol: 'operador',
+    created_at: new Date().toISOString(),
+  });
+
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch(getApiUrl('/api/operadores'), { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          return data.filter((op) => op?.legajo).map(toPerfil);
+        }
+      }
+    } catch {
+      // Sin red o endpoint no disponible: intentar lectura directa (requiere sesión)
+    }
+  }
+
   try {
     const supabase = createClient();
     const { data, error } = await supabase
       .from('perfiles')
-      .select('*')
+      .select('nombre, legajo')
       .eq('rol', 'operador')
       .order('nombre', { ascending: true });
-
-    if (error) {
-      console.error('Error al consultar operadores de planta:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint,
-      });
-
-      // Fallback a API route de Next.js si la política RLS en Supabase aún no fue aplicada
-      if (typeof window !== 'undefined') {
-        try {
-          const res = await fetch(getApiUrl('/api/operadores'));
-          if (res.ok) {
-            const fallbackData = await res.json();
-            if (Array.isArray(fallbackData) && fallbackData.length > 0) {
-              return fallbackData as Perfil[];
-            }
-          }
-        } catch {
-          // Ignorar fallo de fallback
-        }
-      }
-
-      return [];
-    }
-
-    return (data || []) as Perfil[];
-  } catch (err: any) {
-    console.error('Error de conexión consultando operadores:', {
-      message: err?.message,
-      stack: err?.stack,
-    });
-
-    if (typeof window !== 'undefined') {
-      try {
-        const res = await fetch(getApiUrl('/api/operadores'));
-        if (res.ok) {
-          const fallbackData = await res.json();
-          if (Array.isArray(fallbackData) && fallbackData.length > 0) {
-            return fallbackData as Perfil[];
-          }
-        }
-      } catch {
-        // Ignorar fallo de fallback
-      }
-    }
-
+    if (error || !data) return [];
+    return (data as { nombre: string; legajo: string | null }[]).filter((op) => op.legajo).map(toPerfil);
+  } catch {
     return [];
   }
 }
