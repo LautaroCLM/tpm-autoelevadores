@@ -243,6 +243,7 @@ let memoryFallas: Falla[] = [
     foto_url: null,
     detectado_por: 'op-01',
     estado_reparacion: 'en_revision',
+    deleted_at: null,
     created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
     resuelto_en: null,
   },
@@ -252,10 +253,24 @@ let memoryFallas: Falla[] = [
     equipo_id: '22222222-2222-2222-2222-222222222204',
     gravedad: 'critica',
     descripcion: 'Pérdida de líquido hidráulico abundante por manguera principal de elevación',
-    foto_url: null,
+    foto_url: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?w=800',
     detectado_por: 'op-02',
     estado_reparacion: 'reparando',
+    deleted_at: null,
     created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
+    resuelto_en: null,
+  },
+  {
+    id: 'falla-sample-3',
+    respuesta_id: 'resp-mock-3',
+    equipo_id: '22222222-2222-2222-2222-222222222201',
+    gravedad: 'leve',
+    descripcion: 'Cinturón de seguridad con desgaste leve en costura lateral (falla archivada de muestra)',
+    foto_url: 'https://images.unsplash.com/photo-1581092335397-9583fe92d232?w=800',
+    detectado_por: 'op-01',
+    estado_reparacion: 'pendiente',
+    deleted_at: new Date(Date.now() - 3600000 * 12).toISOString(),
+    created_at: new Date(Date.now() - 3600000 * 72).toISOString(),
     resuelto_en: null,
   },
 ];
@@ -322,6 +337,7 @@ export async function saveMockInspeccion(payload: InspeccionPayload): Promise<{ 
         foto_url: resp.falla.foto_base64 || resp.falla.foto_url || null,
         detectado_por: payload.operador_id,
         estado_reparacion: 'pendiente',
+        deleted_at: null,
         created_at: new Date().toISOString(),
         resuelto_en: null,
       };
@@ -379,4 +395,34 @@ export async function updateMockFallaEstado(fallaId: string, nuevoEstado: Falla[
     return true;
   }
   return false;
+}
+
+export async function archivarMockFalla(fallaId: string): Promise<boolean> {
+  const idx = memoryFallas.findIndex((f) => f.id === fallaId);
+  if (idx !== -1) {
+    memoryFallas[idx] = {
+      ...memoryFallas[idx],
+      deleted_at: new Date().toISOString(),
+    };
+    return true;
+  }
+  return false;
+}
+
+export async function restaurarMockFalla(fallaId: string): Promise<boolean> {
+  const idx = memoryFallas.findIndex((f) => f.id === fallaId);
+  if (idx !== -1) {
+    memoryFallas[idx] = {
+      ...memoryFallas[idx],
+      deleted_at: null,
+    };
+    return true;
+  }
+  return false;
+}
+
+export async function eliminarMockFallaDefinitiva(fallaId: string): Promise<boolean> {
+  const initialLen = memoryFallas.length;
+  memoryFallas = memoryFallas.filter((f) => f.id !== fallaId);
+  return memoryFallas.length < initialLen;
 }

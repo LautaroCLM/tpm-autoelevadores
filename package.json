@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "check": "tsc --noEmit",
+    "test": "node --loader ./scripts/loader.mjs scripts/audit-test.mjs",
     "seed:users": "node scripts/seed-usuarios.mjs"
   },
   "dependencies": {

@@ -68,3 +68,16 @@ export interface InspeccionConDetalle extends Inspeccion {
   operador_legajo?: string;
 }
 
+export interface StoragePurgaTask {
+  id: string;
+  bucket_id: string;
+  file_path: string;
+  falla_id: string | null;
+  estado: 'pendiente' | 'procesando' | 'completado' | 'fallido';
+  intentos: number;
+  ultimo_error: string | null;
+  creado_en: string;
+  ultimo_intento_en: string | null;
+  completado_en: string | null;
+}
+

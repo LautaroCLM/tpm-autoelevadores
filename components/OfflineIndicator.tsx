@@ -84,14 +84,46 @@ export const OfflineIndicator: React.FC = () => {
     if (isSyncing) return;
     setIsSyncing(true);
     try {
+      let hadAuthError = false;
+      let hadOperatorMismatch = false;
       const result = await processOfflineQueue(async (payload) => {
         const res = await submitInspeccion(payload);
+        const errMsg = res.error || '';
+        const isAuthError =
+          errMsg.includes('Sesión no válida') ||
+          errMsg.includes('AUTH_REQUIRED') ||
+          errMsg.includes('expirada');
+
+        const isOperatorMismatch = errMsg.includes('otro operador');
+
+        if (isAuthError) {
+          hadAuthError = true;
+        }
+        if (isOperatorMismatch) {
+          hadOperatorMismatch = true;
+        }
+
+        const isTransient =
+          isNetworkError(errMsg) ||
+          isAuthError ||
+          isOperatorMismatch ||
+          errMsg.includes('Demasiados intentos') ||
+          errMsg.includes('429');
+
         return {
           success: res.success,
           error: res.error,
-          isFatal: !res.success && !res.queuedOffline && !isNetworkError(res.error),
+          isFatal: !res.success && !res.queuedOffline && !isTransient,
         };
       });
+
+      if (hadOperatorMismatch) {
+        toast.warning(
+          'Hay inspecciones pendientes de otro operario. Inicie sesión con el usuario autor o como supervisor para sincronizarlas.'
+        );
+      } else if (hadAuthError) {
+        toast.warning('Hay inspecciones pendientes: inicie sesión para completar la sincronización');
+      }
 
       if (result.synced > 0) {
         toast.success(`Se sincronizaron ${result.synced} inspección(es) pendiente(s)`);

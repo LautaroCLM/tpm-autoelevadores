@@ -135,9 +135,10 @@ export default function EquipoFichaPage() {
     }
 
     if (numHorometro < equipo.horometro_actual) {
-      toast.warning(
-        `El horómetro ingresado (${numHorometro} hs) es menor al registrado anteriormente (${equipo.horometro_actual} hs). Verifique el tablero.`
+      toast.error(
+        `El horómetro ingresado (${numHorometro} hs) no puede ser inferior al registrado anteriormente (${equipo.horometro_actual} hs). Verifique el tablero del equipo.`
       );
+      return;
     }
 
     // Modal de confirmación si el incremento es desproporcionadamente mayor (+100 hs)
@@ -624,6 +625,11 @@ export default function EquipoFichaPage() {
                                       >
                                         {f.gravedad}
                                       </span>
+                                      {f.deleted_at && (
+                                        <span className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-600">
+                                          Archivada
+                                        </span>
+                                      )}
                                       {itemRelacionado && (
                                         <span className="text-xs font-bold text-white">
                                           {itemRelacionado.etiqueta}

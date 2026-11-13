@@ -1,4 +1,4 @@
-import { InspeccionPayload, OfflineQueuedInspeccion } from '../types/tpm';
+import type { InspeccionPayload, OfflineQueuedInspeccion } from '../types/tpm';
 import { openDB, QUEUE_STORE as STORE_NAME } from './db';
 
 /**
@@ -50,6 +50,25 @@ export async function getQueuedInspecciones(): Promise<OfflineQueuedInspeccion[]
 }
 
 /**
+ * Actualiza el estado de una inspección encolada en IndexedDB (reintentos y último error).
+ */
+export async function updateQueuedInspeccion(item: OfflineQueuedInspeccion): Promise<void> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.put(item);
+
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    console.error('Error updating queued inspection in IndexedDB:', err);
+  }
+}
+
+/**
  * Elimina una inspección de la cola tras sincronizarse con éxito.
  */
 export async function removeQueuedInspeccion(id: string): Promise<void> {
@@ -75,7 +94,8 @@ export async function removeQueuedInspeccion(id: string): Promise<void> {
 
 /**
  * Sincroniza todas las inspecciones pendientes ejecutando una función de sincronización.
- * Evita bucles infinitos descartando errores fatales de validación de negocio.
+ * Evita bucles infinitos descartando errores fatales de validación de negocio no recuperables,
+ * mientras conserva de forma persistente los reintentos en IndexedDB ante fallos transitorios de red.
  */
 export async function processOfflineQueue(
   syncFn: (item: InspeccionPayload) => Promise<boolean | { success: boolean; isFatal?: boolean; error?: string }>
@@ -101,14 +121,14 @@ export async function processOfflineQueue(
       } else {
         item.retryCount = (item.retryCount || 0) + 1;
         item.lastError = typeof res === 'object' ? res.error : undefined;
-        if (item.retryCount >= 5) {
-          console.warn(`Inspección ${item.id} descartada de la cola local tras 5 reintentos fallidos`);
-          await removeQueuedInspeccion(item.id);
-          fatal++;
-        }
+        // Persistir el estado de reintentos y error en IndexedDB
+        await updateQueuedInspeccion(item);
         failed++;
       }
-    } catch {
+    } catch (err: any) {
+      item.retryCount = (item.retryCount || 0) + 1;
+      item.lastError = err?.message || 'Error inesperado durante sincronización';
+      await updateQueuedInspeccion(item);
       failed++;
     }
   }

@@ -50,6 +50,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     loadAuth();
 
+    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+      const handleCustomAuthChange = () => {
+        loadAuth();
+      };
+      window.addEventListener('tpm_auth_changed', handleCustomAuthChange);
+      return () => {
+        window.removeEventListener('tpm_auth_changed', handleCustomAuthChange);
+      };
+    }
+
     // 1. Escuchar cambios de autenticación nativos de Supabase
     const supabase = createClient();
     const {

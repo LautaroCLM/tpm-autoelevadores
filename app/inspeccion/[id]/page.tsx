@@ -438,8 +438,6 @@ export default function InspeccionChecklistPage() {
   }
 
   // PANTALLA DE ÉXITO AL FINALIZAR
-  // PANTALLA DE ÉXITO AL FINALIZAR
-  if (completedResult) {
   if (completedResult && equipo) {
     const isOfflineResult = completedResult.inspeccionId === 'offline-queued';
 
@@ -569,7 +567,6 @@ export default function InspeccionChecklistPage() {
         </div>
       </div>
     );
-  }
   }
 
   const handleBackClick = () => {

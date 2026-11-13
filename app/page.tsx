@@ -43,6 +43,8 @@ import {
   CheckCircle2,
   Users,
   Loader2,
+  Lock,
+  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -58,6 +60,13 @@ export default function HomePage() {
   const [selectedQrEquipo, setSelectedQrEquipo] = useState<Equipo | null>(null);
   const [signingInId, setSigningInId] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Modal de PIN de operador (para accesos táctiles o credenciales sin token)
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pinTargetOp, setPinTargetOp] = useState<Perfil | null>(null);
+  const [enteredPin, setEnteredPin] = useState('');
+  const [submittingPin, setSubmittingPin] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -121,20 +130,32 @@ export default function HomePage() {
     toast.info('Sesión cerrada correctamente');
   };
 
-  const handleQuickSelectOperator = async (op: Perfil) => {
+  const handleQuickSelectOperator = (op: Perfil) => {
     if (signingInId) return;
 
-    if (perfil?.id === op.id) {
+    if (perfil?.legajo && perfil.legajo === op.legajo) {
       toast.info(`Ya estás operando como ${op.nombre}`);
       return;
     }
 
-    setSigningInId(op.id);
-    toast.loading(`Iniciando sesión como ${op.nombre}...`);
+    setPinTargetOp(op);
+    setEnteredPin('');
+    setPinError(null);
+    setPinModalOpen(true);
+  };
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pinTargetOp || !enteredPin.trim()) return;
+
+    setSubmittingPin(true);
+    setPinError(null);
     try {
-      const res = await quickSignInOperator(op);
-      toast.dismiss();
+      const res = await quickSignInOperator(pinTargetOp, enteredPin.trim());
       if (res.success && res.perfil) {
+        setPinModalOpen(false);
+        setPinTargetOp(null);
+        setEnteredPin('');
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
         }
@@ -147,30 +168,27 @@ export default function HomePage() {
           }
         }, 150);
       } else {
-        toast.error(res.error || 'No se pudo seleccionar el operador');
+        setPinError(res.error || 'PIN de operador incorrecto');
       }
     } catch (err: any) {
-      toast.dismiss();
-      toast.error(err?.message || 'Error al seleccionar operador');
+      setPinError(err?.message || 'Error de conexión');
     } finally {
-      setSigningInId(null);
+      setSubmittingPin(false);
     }
   };
-
-
 
   const handleScanResult = async (code: string) => {
     setScannerOpen(false);
     setOperatorScannerOpen(false);
 
     const clean = code.trim();
-    // Si el QR escaneado es una credencial de operador física (ej: "TPM:OP:4029" o similar)
+    // Si el QR escaneado es una credencial de operador física (ej: "TPM:OP:4029" o con token)
     if (
       clean.toUpperCase().startsWith('TPM:OP:') ||
       clean.toUpperCase().startsWith('TPM-OP:') ||
       clean.startsWith('{')
     ) {
-      toast.loading('Autenticando credencial de operador...');
+      toast.loading('Validando credencial de operador...');
       try {
         const res = await signInOperatorWithQR(clean);
         toast.dismiss();
@@ -186,6 +204,19 @@ export default function HomePage() {
               fleetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
           }, 150);
+        } else if (res.requiresPin && res.legajo) {
+          // La credencial es válida pero no tiene token secreto embebido: solicitar PIN
+          const matchingOp = operadores.find((o) => o.legajo === res.legajo) || {
+            id: '',
+            legajo: res.legajo,
+            nombre: `Operador #${res.legajo}`,
+            rol: 'operador',
+            created_at: new Date().toISOString(),
+          };
+          setPinTargetOp(matchingOp);
+          setEnteredPin('');
+          setPinError(null);
+          setPinModalOpen(true);
         } else {
           toast.error(res.error || 'Credencial de operador no válida');
         }
@@ -393,13 +424,35 @@ export default function HomePage() {
               ))}
             </div>
           ) : operadores.length === 0 ? (
-            <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 text-center">
-              <p className="text-xs text-slate-400">No se encontraron operadores registrados en la base de datos.</p>
+            <div className="p-4 sm:p-5 bg-slate-950/60 rounded-xl border border-slate-800 text-center space-y-2.5">
+              <p className="text-xs sm:text-sm font-bold text-slate-200">
+                Identificación de Operador Requerida
+              </p>
+              <p className="text-[11px] sm:text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                Escaneá tu credencial QR de operador o ingresá con tu legajo y clave para habilitar tu turno de trabajo.
+              </p>
+              <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setOperatorScannerOpen(true)}
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center gap-1.5 cursor-pointer btn-tactile shadow-xs"
+                >
+                  <Camera size={13} />
+                  <span>Escanear Credencial QR</span>
+                </button>
+                <Link
+                  href="/login"
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-850 text-slate-300 border border-slate-700 transition flex items-center gap-1.5 cursor-pointer btn-tactile shadow-xs"
+                >
+                  <UserCheck size={13} />
+                  <span>Ingresar con Legajo</span>
+                </Link>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
               {operadores.map((op, idx) => {
-                const isActive = perfil?.id === op.id;
+                const isActive = Boolean(perfil?.legajo) && perfil?.legajo === op.legajo;
                 const isSigningInThis = signingInId === op.id;
                 const isAnySigningIn = Boolean(signingInId);
 
@@ -595,6 +648,96 @@ export default function HomePage() {
           onClose={() => setSelectedQrEquipo(null)}
           equipo={selectedQrEquipo}
         />
+      )}
+
+      {/* Modal de PIN de Operador (Prevención de Suplantación) */}
+      {pinModalOpen && pinTargetOp && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-[#111724] border border-slate-850 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-amber-400">
+                <Lock size={18} />
+                <h3 className="text-sm font-bold text-white">Validar Identidad de Operador</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPinModalOpen(false);
+                  setPinTargetOp(null);
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center font-black text-sm shrink-0">
+                {pinTargetOp.nombre.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white truncate">{pinTargetOp.nombre}</p>
+                <p className="text-[11px] font-mono text-slate-400">
+                  Legajo #{pinTargetOp.legajo || 'S/N'}
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={handlePinSubmit} className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  PIN o Clave Personal de Acceso
+                </label>
+                <input
+                  type="password"
+                  autoFocus
+                  required
+                  value={enteredPin}
+                  onChange={(e) => setEnteredPin(e.target.value)}
+                  placeholder="Ingrese su PIN asignado"
+                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-amber-400 font-mono tracking-widest text-center"
+                />
+              </div>
+
+              {pinError && (
+                <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-500/40 text-rose-300 text-xs">
+                  {pinError}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={submittingPin}
+                  onClick={() => {
+                    setPinModalOpen(false);
+                    setPinTargetOp(null);
+                  }}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingPin || !enteredPin.trim()}
+                  className="flex-1 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  {submittingPin ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Validando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserCheck size={14} />
+                      <span>Confirmar Turno</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

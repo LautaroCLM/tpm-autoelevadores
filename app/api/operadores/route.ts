@@ -1,72 +1,59 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, getClientIp } from '../../../lib/utils/rateLimit';
+import { jsonWithCors, preflight } from '../../../lib/server/http';
+import { createAdminClient, getServerSupabaseEnv } from '../../../lib/server/supervisorAuth';
 
 export const dynamic = 'force-dynamic';
 
-function getCorsHeaders(req?: Request) {
-  const requestOrigin = req?.headers.get('origin') || '';
-  const allowedOrigins = [
-    'https://tpm-autoelevadores.vercel.app',
-    'http://localhost',
-    'capacitor://localhost',
-  ];
-
-  let origin = '*';
-  if (requestOrigin) {
-    const isAllowed = allowedOrigins.some((allowed) => requestOrigin.startsWith(allowed));
-    if (isAllowed || requestOrigin.includes('localhost') || requestOrigin.startsWith('capacitor:')) {
-      origin = requestOrigin;
-    }
-  }
-
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
-    'Access-Control-Allow-Credentials': 'true',
-  };
-}
+const METHODS = 'GET, OPTIONS';
 
 export async function OPTIONS(req: Request) {
-  return new NextResponse(null, {
-    status: 200,
-    headers: getCorsHeaders(req),
-  });
+  return preflight(req, METHODS);
 }
 
-function jsonResponse(data: any, req: Request, status = 200) {
-  return NextResponse.json(data, {
-    status,
-    headers: getCorsHeaders(req),
-  });
-}
-
+/**
+ * GET /api/operadores
+ *
+ * Lista pública y mínima de operadores para los botones de "Accesos Rápidos" del
+ * terminal de planta (antes de iniciar sesión). Solo devuelve nombre y legajo:
+ * nunca UUIDs, roles ni datos de supervisores. El legajo es un identificador
+ * público; para entrar siempre se exige PIN o tarjeta QR con token.
+ */
 export async function GET(req: Request) {
-  try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-    if (!url || !serviceKey) {
-      return jsonResponse({ error: 'Supabase credentials missing' }, req, 500);
-    }
-
-    const supabase = createClient(url, serviceKey, {
-      auth: { persistSession: false, autoRefreshToken: false },
+  const clientIp = getClientIp(req);
+  const rl = checkRateLimit(`operadores_list_${clientIp}`, { maxRequests: 60, windowMs: 60 * 1000 });
+  if (!rl.success) {
+    return jsonWithCors({ error: 'Demasiadas solicitudes. Reintente en unos segundos.' }, req, METHODS, 429, {
+      'Retry-After': String(rl.resetSeconds),
     });
+  }
 
-    const { data, error } = await supabase
+  const env = getServerSupabaseEnv();
+  if (!env) {
+    return jsonWithCors({ error: 'Configuración de servidor incompleta' }, req, METHODS, 500);
+  }
+
+  try {
+    const supabaseAdmin = createAdminClient(env.url, env.serviceKey);
+    const { data, error } = await supabaseAdmin
       .from('perfiles')
-      .select('id, nombre, legajo, rol, created_at')
+      .select('nombre, legajo')
       .eq('rol', 'operador')
+      .not('legajo', 'is', null)
       .order('nombre', { ascending: true });
 
     if (error) {
-      return jsonResponse({ error: error.message }, req, 500);
+      return jsonWithCors({ error: 'No se pudo consultar el listado de operadores' }, req, METHODS, 500);
     }
 
-    return jsonResponse(data || [], req);
-  } catch (err: any) {
-    return jsonResponse({ error: err?.message || 'Error interno' }, req, 500);
+    const operadores = (data || []).map((op: { nombre: string; legajo: string | null }) => ({
+      nombre: op.nombre,
+      legajo: op.legajo,
+    }));
+
+    return jsonWithCors(operadores, req, METHODS, 200, {
+      'Cache-Control': 'no-store',
+    });
+  } catch {
+    return jsonWithCors({ error: 'Error interno' }, req, METHODS, 500);
   }
 }

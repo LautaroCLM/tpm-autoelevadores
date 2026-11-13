@@ -3,12 +3,16 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import QRCode from 'qrcode';
+import { OperadoresAdminPanel } from '../../components/OperadoresAdminPanel';
 import {
   fetchEquipos,
   fetchInspecciones,
   fetchFallas,
   updateFallaEstado,
+  archivarFalla,
+  restaurarFalla,
+  eliminarFallaDefinitiva,
+  procesarPurgasPendientes,
   createEquipo,
   updateEquipo,
   deleteEquipo,
@@ -48,6 +52,8 @@ import {
   Plus,
   Edit2,
   Trash2,
+  Archive,
+  ArchiveRestore,
   QrCode,
   Printer,
   ShieldCheck,
@@ -60,55 +66,6 @@ import {
   Wrench,
 } from 'lucide-react';
 import { toast } from 'sonner';
-
-interface OperatorCardData {
-  nombre: string;
-  legajo: string;
-  codigoQR: string;
-  rol: string;
-}
-
-function OperatorQRCard({ op }: { op: OperatorCardData }) {
-  const [qrDataUrl, setQrDataUrl] = useState<string>('');
-
-  useEffect(() => {
-    QRCode.toDataURL(op.codigoQR, {
-      width: 200,
-      margin: 1,
-      color: { dark: '#000000', light: '#ffffff' },
-    })
-      .then((url) => setQrDataUrl(url))
-      .catch((err) => console.error('Error generando QR de credencial:', err));
-  }, [op.codigoQR]);
-
-  return (
-    <div className="bg-[#0B0F17] border border-slate-800/90 rounded-xl p-4 flex items-center justify-between gap-4">
-      <div className="space-y-1">
-        <span className="text-xs font-mono font-bold text-amber-400 uppercase tracking-wider">
-          Legajo #{op.legajo}
-        </span>
-        <h3 className="font-bold text-base text-white">{op.nombre}</h3>
-        <p className="text-xs text-slate-400 font-mono">{op.rol}</p>
-        <div className="text-[10px] font-mono text-slate-500 bg-slate-900/90 px-2 py-1 rounded border border-slate-800 mt-2 truncate max-w-[200px]">
-          {op.codigoQR}
-        </div>
-      </div>
-
-      <div className="w-20 h-20 bg-white p-1 rounded-xl flex items-center justify-center shrink-0 shadow-md">
-        {qrDataUrl ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
-          <img
-            src={qrDataUrl}
-            alt={`QR Credencial ${op.nombre}`}
-            className="w-full h-full object-contain select-none"
-          />
-        ) : (
-          <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default function SupervisorDashboardPage() {
   const router = useRouter();
@@ -131,6 +88,11 @@ export default function SupervisorDashboardPage() {
   const [serviceModalEquipo, setServiceModalEquipo] = useState<Equipo | null>(null);
   const [serviceIntervaloInput, setServiceIntervaloInput] = useState<string>('250');
 
+  // Modales de Gestión de Fallas (Archivado y Purga Definitiva)
+  const [archiveConfirmFalla, setArchiveConfirmFalla] = useState<Falla | null>(null);
+  const [hardDeleteConfirmFalla, setHardDeleteConfirmFalla] = useState<Falla | null>(null);
+  const [submittingFallaId, setSubmittingFallaId] = useState<string | null>(null);
+
   // Formulario nuevo equipo
   const [formInterno, setFormInterno] = useState('');
   const [formMarca, setFormMarca] = useState('');
@@ -148,12 +110,15 @@ export default function SupervisorDashboardPage() {
       const [eqs, insps, fls] = await Promise.all([
         fetchEquipos(true), // Cargar activos y dados de baja para supervisores
         fetchInspecciones(),
-        fetchFallas(),
+        fetchFallas(true), // Cargar activas y archivadas para supervisores
       ]);
 
       setEquipos(eqs);
       setInspecciones(insps);
       setFallas(fls);
+
+      // Reintentar tareas de purga de fotos pendientes en segundo plano si existen
+      procesarPurgasPendientes().catch(() => {});
     } catch (err) {
       console.error('Error loading dashboard data:', err);
     } finally {
@@ -178,15 +143,18 @@ export default function SupervisorDashboardPage() {
     loadData();
   }, [user, isSupervisorOrMaint, authLoading, router]);
 
-  // Stats calculation (basado en equipos activos)
+  // Stats calculation (basado en equipos y fallas activas)
   const equiposActivos = equipos.filter((e) => !e.deleted_at);
   const equiposDadosDeBaja = equipos.filter((e) => e.deleted_at != null);
+
+  const fallasActivas = fallas.filter((f) => !f.deleted_at);
+  const fallasArchivadas = fallas.filter((f) => f.deleted_at != null);
 
   const totalEquipos = equiposActivos.length;
   const operativos = equiposActivos.filter((e) => e.estado === 'operativo').length;
   const observados = equiposActivos.filter((e) => e.estado === 'observado').length;
   const fueraServicio = equiposActivos.filter((e) => e.estado === 'fuera_de_servicio').length;
-  const fallasPendientes = fallas.filter(
+  const fallasPendientes = fallasActivas.filter(
     (f) => f.estado_reparacion !== 'cerrado' && f.estado_reparacion !== 'reparado'
   ).length;
 
@@ -220,6 +188,74 @@ export default function SupervisorDashboardPage() {
       }
     } catch {
       toast.error('Error al actualizar estado');
+    }
+  };
+
+  const handleArchivarFallaSubmit = async () => {
+    if (!archiveConfirmFalla) return;
+    const targetId = archiveConfirmFalla.id;
+    setSubmittingFallaId(targetId);
+    try {
+      const res = await archivarFalla(targetId);
+      if (res.success) {
+        toast.success(`Falla archivada exitosamente (evidencia fotográfica e historial conservados)`);
+        const nowIso = new Date().toISOString();
+        setFallas((prev) =>
+          prev.map((f) => (f.id === targetId ? { ...f, deleted_at: nowIso } : f))
+        );
+        setArchiveConfirmFalla(null);
+      } else {
+        toast.error(res.error || 'Error al archivar la falla');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al archivar la falla');
+    } finally {
+      setSubmittingFallaId(null);
+    }
+  };
+
+  const handleRestaurarFallaSubmit = async (falla: Falla) => {
+    setSubmittingFallaId(falla.id);
+    try {
+      const res = await restaurarFalla(falla.id);
+      if (res.success) {
+        toast.success(`Falla restaurada a los listados operativos`);
+        setFallas((prev) =>
+          prev.map((f) => (f.id === falla.id ? { ...f, deleted_at: null } : f))
+        );
+      } else {
+        toast.error(res.error || 'Error al restaurar la falla');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al restaurar la falla');
+    } finally {
+      setSubmittingFallaId(null);
+    }
+  };
+
+  const handleEliminarFallaDefinitivaSubmit = async () => {
+    if (!hardDeleteConfirmFalla) return;
+    const targetId = hardDeleteConfirmFalla.id;
+    setSubmittingFallaId(targetId);
+    try {
+      const res = await eliminarFallaDefinitiva(targetId);
+      if (res.success) {
+        if (res.photoDeleted) {
+          toast.success('Falla y fotografía eliminadas definitivamente de la base de datos y Storage');
+        } else if (res.purgaQueued) {
+          toast.info('Falla eliminada de la base de datos. La purga de la fotografía quedó registrada en cola para limpieza diferida.');
+        } else {
+          toast.success('Falla eliminada definitivamente de la base de datos');
+        }
+        setFallas((prev) => prev.filter((f) => f.id !== targetId));
+        setHardDeleteConfirmFalla(null);
+      } else {
+        toast.error(res.error || 'Error al eliminar la falla definitivamente');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Error al procesar la eliminación');
+    } finally {
+      setSubmittingFallaId(null);
     }
   };
 
@@ -698,7 +734,7 @@ export default function SupervisorDashboardPage() {
             }`}
           >
             <QrCode size={15} />
-            <span>Credenciales QR</span>
+            <span>Operadores</span>
           </button>
         </div>
       </ScrollReveal>
@@ -916,13 +952,14 @@ export default function SupervisorDashboardPage() {
               <Filter size={13} className="text-amber-500" /> Filtrar:
             </span>
             {[
-              { id: 'todas', label: 'Todas' },
-              { id: 'activas', label: 'Activas' },
+              { id: 'todas', label: `Todas (${fallasActivas.length})` },
+              { id: 'activas', label: `Activas (${fallasPendientes})` },
               { id: 'pendiente', label: 'Pendientes' },
               { id: 'en_revision', label: 'En Revisión' },
               { id: 'reparando', label: 'Reparando' },
               { id: 'reparado', label: 'Reparadas' },
               { id: 'cerrado', label: 'Cerradas' },
+              { id: 'archivadas', label: `Archivadas (${fallasArchivadas.length})` },
             ].map((fil) => (
               <button
                 key={fil.id}
@@ -938,92 +975,168 @@ export default function SupervisorDashboardPage() {
             ))}
           </div>
 
-          {filteredFallas.length === 0 ? (
+          {fallas.filter((f) => {
+            if (fallaFilter === 'archivadas') return f.deleted_at != null;
+            if (f.deleted_at != null) return false;
+            if (fallaFilter === 'todas') return true;
+            if (fallaFilter === 'activas') return f.estado_reparacion !== 'cerrado' && f.estado_reparacion !== 'reparado';
+            return f.estado_reparacion === fallaFilter;
+          }).length === 0 ? (
             <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-10 text-center text-slate-400">
               <CheckCircle size={36} className="text-emerald-400 mx-auto mb-2 opacity-80" />
               <p className="font-bold text-white text-base">No hay fallas con el filtro seleccionado</p>
-              <p className="text-xs font-mono text-slate-500 mt-1">Todos los ítems verificados están conformes.</p>
+              <p className="text-xs font-mono text-slate-500 mt-1">
+                {fallaFilter === 'archivadas'
+                  ? 'No hay fallas archivadas en la papelera.'
+                  : 'Todos los ítems verificados están conformes.'}
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3">
-              {filteredFallas.map((falla, idx) => {
-                const eqMatch = equipos.find((e) => e.id === falla.equipo_id);
-                return (
-                  <ScrollReveal key={falla.id} delay={idx * 40} distance={12}>
-                    <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-5 shadow-lg shadow-black/40 space-y-3">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                        <div className="flex items-center gap-2.5">
-                          <GravedadBadge gravedad={falla.gravedad} size="sm" />
-                          <span className="font-bold text-sm text-white">
-                            Autoelevador Interno #{eqMatch?.interno || 'N/A'} ({eqMatch?.marca})
-                          </span>
-                        </div>
+              {fallas
+                .filter((f) => {
+                  if (fallaFilter === 'archivadas') return f.deleted_at != null;
+                  if (f.deleted_at != null) return false;
+                  if (fallaFilter === 'todas') return true;
+                  if (fallaFilter === 'activas') return f.estado_reparacion !== 'cerrado' && f.estado_reparacion !== 'reparado';
+                  return f.estado_reparacion === fallaFilter;
+                })
+                .map((falla, idx) => {
+                  const eqMatch = equipos.find((e) => e.id === falla.equipo_id);
+                  const isArchived = falla.deleted_at != null;
 
-                        <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                          <Clock size={12} className="text-slate-500" />
-                          <span>Detectado: {formatDate(falla.created_at)}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row items-start gap-4">
-                        {falla.foto_url && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPhoto(falla.foto_url)}
-                            className="w-24 h-20 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 relative shrink-0 group cursor-pointer"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={falla.foto_url}
-                              alt="Foto defecto"
-                              className="w-full h-full object-cover group-hover:scale-105 transition"
-                            />
-                            <span className="absolute bottom-1 right-1 bg-black/80 font-mono text-[9px] text-white px-1.5 py-0.5 rounded">
-                              Ver
+                  return (
+                    <ScrollReveal key={falla.id} delay={idx * 40} distance={12}>
+                      <div className={`bg-[#111724] border rounded-2xl p-5 shadow-lg shadow-black/40 space-y-3 ${
+                        isArchived
+                          ? 'border-amber-900/50 bg-amber-950/10 opacity-85'
+                          : 'border-slate-800/90 hover:border-slate-700/90'
+                      }`}>
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                          <div className="flex items-center gap-2.5">
+                            <GravedadBadge gravedad={falla.gravedad} size="sm" />
+                            <span className="font-bold text-sm text-white">
+                              Autoelevador Interno #{eqMatch?.interno || 'N/A'} ({eqMatch?.marca})
                             </span>
-                          </button>
-                        )}
+                            {isArchived && (
+                              <span className="px-2 py-0.5 bg-amber-950 text-amber-300 border border-amber-600 rounded text-[10px] font-mono font-bold uppercase tracking-wider">
+                                Archivada
+                              </span>
+                            )}
+                          </div>
 
-                        <div className="flex-1 space-y-1">
-                          <p className="text-sm text-slate-200 font-medium leading-relaxed">
-                            {falla.descripcion || 'Sin descripción técnica registrada.'}
-                          </p>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                              <Clock size={12} className="text-slate-500" />
+                              <span>Detectado: {formatDate(falla.created_at)}</span>
+                            </div>
+
+                            {!isArchived && (
+                              <button
+                                type="button"
+                                onClick={() => setArchiveConfirmFalla(falla)}
+                                disabled={submittingFallaId === falla.id}
+                                className="p-1.5 text-slate-500 hover:text-amber-400 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                                title="Archivar falla (Soft Delete - Conserva fotografía e historial)"
+                              >
+                                <Archive size={15} />
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
 
-                      {/* Status Changer */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80 bg-[#0B0F17] -mx-5 -mb-5 p-3.5 rounded-b-2xl">
-                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
-                          Estado de Reparación:
-                        </span>
-
-                        <div className="flex flex-wrap gap-1.5">
-                          {(
-                            ['pendiente', 'en_revision', 'reparando', 'reparado', 'cerrado'] as Falla['estado_reparacion'][]
-                          ).map((st) => (
+                        <div className="flex flex-col sm:flex-row items-start gap-4">
+                          {falla.foto_url && (
                             <button
-                              key={st}
                               type="button"
-                              onClick={() => handleUpdateFallaStatus(falla.id, st)}
-                              className={`btn-tactile px-2.5 py-1 rounded text-xs font-mono font-bold transition capitalize cursor-pointer border ${
-                                falla.estado_reparacion === st
-                                  ? st === 'cerrado' || st === 'reparado'
-                                    ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                                    : st === 'reparando'
-                                    ? 'bg-amber-500 text-slate-950 border-amber-400'
-                                    : 'bg-rose-600 text-white border-rose-500'
-                                  : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
-                              }`}
+                              onClick={() => setSelectedPhoto(falla.foto_url)}
+                              className="w-24 h-20 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 relative shrink-0 group cursor-pointer"
                             >
-                              {st.replace('_', ' ')}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={falla.foto_url}
+                                alt="Foto defecto"
+                                className="w-full h-full object-cover group-hover:scale-105 transition"
+                              />
+                              <span className="absolute bottom-1 right-1 bg-black/80 font-mono text-[9px] text-white px-1.5 py-0.5 rounded">
+                                Ver
+                              </span>
                             </button>
-                          ))}
+                          )}
+
+                          <div className="flex-1 space-y-1">
+                            <p className="text-sm text-slate-200 font-medium leading-relaxed">
+                              {falla.descripcion || 'Sin descripción técnica registrada.'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Status Changer & Supervisor Actions */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2.5 border-t border-slate-800/80 bg-[#0B0F17] -mx-5 -mb-5 p-3.5 rounded-b-2xl">
+                          {isArchived ? (
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 w-full">
+                              <span className="text-xs font-mono text-amber-300/80 italic">
+                                Falla archivada del flujo operativo (evidencia técnica conservada).
+                              </span>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRestaurarFallaSubmit(falla)}
+                                  disabled={submittingFallaId === falla.id}
+                                  className="btn-tactile px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-amber-500/40 cursor-pointer"
+                                >
+                                  <ArchiveRestore size={13} />
+                                  <span>Restaurar</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => setHardDeleteConfirmFalla(falla)}
+                                  disabled={submittingFallaId === falla.id}
+                                  className="btn-tactile px-3 py-1.5 bg-rose-950/70 hover:bg-rose-900/80 text-rose-300 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-rose-500/50 cursor-pointer"
+                                  title="Eliminar definitivamente falla y purgar fotografía"
+                                >
+                                  <Trash2 size={13} />
+                                  <span>Eliminar Definitivamente</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">
+                                Estado de Reparación:
+                              </span>
+
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {(
+                                  ['pendiente', 'en_revision', 'reparando', 'reparado', 'cerrado'] as Falla['estado_reparacion'][]
+                                ).map((st) => (
+                                  <button
+                                    key={st}
+                                    type="button"
+                                    onClick={() => handleUpdateFallaStatus(falla.id, st)}
+                                    className={`btn-tactile px-2.5 py-1 rounded text-xs font-mono font-bold transition capitalize cursor-pointer border ${
+                                      falla.estado_reparacion === st
+                                        ? st === 'cerrado' || st === 'reparado'
+                                          ? 'bg-emerald-500 text-slate-950 border-emerald-400'
+                                          : st === 'reparando'
+                                          ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                          : 'bg-rose-600 text-white border-rose-500'
+                                        : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800 hover:text-slate-200'
+                                    }`}
+                                  >
+                                    {st.replace('_', ' ')}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
-                    </div>
-                  </ScrollReveal>
-                );
-              })}
+                    </ScrollReveal>
+                  );
+                })}
             </div>
           )}
         </div>
@@ -1078,58 +1191,8 @@ export default function SupervisorDashboardPage() {
         </div>
       )}
 
-      {/* TAB 4: CREDENCIALES DE OPERADORES (IMPRESIÓN BADGES) */}
-      {activeTab === 'operadores' && (
-        <div className="space-y-4">
-          <div className="bg-[#111724] border border-slate-800/90 rounded-2xl p-5 sm:p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-black text-white flex items-center gap-2">
-                <QrCode size={18} className="text-amber-400" />
-                Credenciales Técnicas de Operadores
-              </h2>
-              <span className="text-[11px] font-mono text-slate-500 uppercase tracking-wider">
-                Impresión de Identificación
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">
-              Imprimí o pegá estas tarjetas para que los operarios identifiquen su sesión en 2 segundos antes de iniciar el checklist preventivo.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-              {[
-                {
-                  nombre: 'Macri Eduardo',
-                  legajo: '4029',
-                  codigoQR: 'TPM:OP:4029',
-                  rol: 'Operador Turno Mañana',
-                },
-                {
-                  nombre: 'Cervantes Diego',
-                  legajo: '5118',
-                  codigoQR: 'TPM:OP:5118',
-                  rol: 'Operador Turno Tarde',
-                },
-                {
-                  nombre: 'Casal Gustavo',
-                  legajo: '2045',
-                  codigoQR: 'TPM:OP:2045',
-                  rol: 'Operador Turno Rotativo',
-                },
-                {
-                  nombre: 'Lavin Leo',
-                  legajo: '3082',
-                  codigoQR: 'TPM:OP:3082',
-                  rol: 'Operador Turno Noche',
-                },
-              ].map((op, idx) => (
-                <ScrollReveal key={op.legajo} delay={idx * 60}>
-                  <OperatorQRCard op={op} />
-                </ScrollReveal>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* TAB 4: OPERADORES, PIN Y TARJETAS QR */}
+      {activeTab === 'operadores' && <OperadoresAdminPanel />}
 
       {/* MODAL 1: REGISTRAR NUEVO EQUIPO */}
       {createModalOpen && (
@@ -1608,6 +1671,114 @@ export default function SupervisorDashboardPage() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* MODAL CONFIRMACIÓN ARCHIVADO DE FALLA (SOFT DELETE) */}
+      {archiveConfirmFalla && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-amber-500/50 rounded-2xl max-w-md w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto">
+              <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                  <Archive size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-white">Archivar Falla de Gestión</h3>
+                  <p className="text-xs font-mono text-slate-400">Soft Delete de Gestión Operativa</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-xs text-slate-300">
+                <p>
+                  ¿Estás seguro de archivar la falla <strong className="text-white">"{archiveConfirmFalla.descripcion || 'Sin descripción'}"</strong>?
+                </p>
+                <div className="bg-[#0B0F17] p-3 rounded-xl border border-slate-800 space-y-1.5 font-mono text-[11px]">
+                  <p className="text-slate-400">
+                    • La falla desaparecerá de los listados activos y contadores del Dashboard.
+                  </p>
+                  <p className="text-amber-300">
+                    • Sus fotografías y la evidencia técnica se conservarán 100% intactas.
+                  </p>
+                  <p className="text-slate-400">
+                    • El registro del checklist original en la bitácora histórica no se alterará.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setArchiveConfirmFalla(null)}
+                  disabled={submittingFallaId === archiveConfirmFalla.id}
+                  className="btn-tactile flex-1 py-2.5 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleArchivarFallaSubmit}
+                  disabled={submittingFallaId === archiveConfirmFalla.id}
+                  className="btn-tactile flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Archive size={14} />
+                  <span>{submittingFallaId === archiveConfirmFalla.id ? 'Archivando...' : 'Confirmar Archivado'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {/* MODAL CONFIRMACIÓN ELIMINACIÓN DEFINITIVA Y PURGA DE FOTO (HARD DELETE) */}
+      {hardDeleteConfirmFalla && (
+        <ModalPortal>
+          <div className="fixed inset-0 z-[9999] bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh">
+            <div className="bg-[#111724] border border-rose-500/60 rounded-2xl max-w-lg w-full p-5 sm:p-6 shadow-2xl space-y-4 my-auto">
+              <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-950 text-rose-400 border border-rose-500 flex items-center justify-center shrink-0">
+                  <Trash2 size={20} />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-rose-300">Eliminación Definitiva y Purga de Foto</h3>
+                  <p className="text-xs font-mono text-rose-400/80">Acción Irreversible de Administración</p>
+                </div>
+              </div>
+
+              <div className="bg-rose-950/40 border border-rose-500/40 p-3.5 rounded-xl space-y-2 text-xs text-rose-200">
+                <div className="font-bold text-rose-300 flex items-center gap-1.5 uppercase font-mono tracking-wider">
+                  <ShieldAlert size={15} /> Advertencia de Seguridad:
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed">
+                  <li>Se eliminará permanentemente la falla de la base de datos de gestión.</li>
+                  <li>Su evidencia fotográfica adjunta será purgada de Supabase Storage para liberar espacio.</li>
+                  <li><strong>Esta operación NO es un archivado y NO se puede deshacer.</strong></li>
+                  <li>El resultado histórico del checklist (respuesta <code className="font-mono bg-rose-950 px-1 py-0.5 rounded border border-rose-800">es_falla</code>) e inspección original permanecerán intactos en la bitácora.</li>
+                  <li>Si Storage no responde de inmediato, la purga de la foto quedará registrada en la cola persistente para reintento automático.</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setHardDeleteConfirmFalla(null)}
+                  disabled={submittingFallaId === hardDeleteConfirmFalla.id}
+                  className="btn-tactile flex-1 py-2.5 bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl hover:bg-slate-750 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEliminarFallaDefinitivaSubmit}
+                  disabled={submittingFallaId === hardDeleteConfirmFalla.id}
+                  className="btn-tactile flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-black text-xs rounded-xl shadow-lg shadow-rose-950/60 active:scale-[0.98] cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <Trash2 size={14} />
+                  <span>{submittingFallaId === hardDeleteConfirmFalla.id ? 'Eliminando...' : 'Eliminar y Purgar Foto'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </ModalPortal>
