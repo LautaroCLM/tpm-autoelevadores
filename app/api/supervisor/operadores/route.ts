@@ -1,4 +1,5 @@
-import { checkRateLimit, getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
+import { getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
+import { persistentRateLimit } from '../../../../lib/server/rateLimitStore';
 import { jsonWithCors, preflight } from '../../../../lib/server/http';
 import { verifySupervisorAuth, cerrarSesionesUsuario } from '../../../../lib/server/supervisorAuth';
 import { emailOperador, validarLegajo, validarPin } from '../../../../lib/utils/pin';
@@ -68,8 +69,8 @@ export async function GET(req: Request) {
  */
 export async function POST(req: Request) {
   const clientIp = getClientIp(req);
-  const rl = checkRateLimit(`supervisor_operadores_${clientIp}`, { maxRequests: 30, windowMs: 60 * 1000 });
-  if (!rl.success) {
+  const rl = await persistentRateLimit(`supervisor_operadores:${clientIp}`, { max: 30, windowSeconds: 60 });
+  if (!rl.allowed) {
     return json({ error: `Límite de operaciones excedido. Espere ${rl.resetSeconds} segundos.` }, req, 429);
   }
 
