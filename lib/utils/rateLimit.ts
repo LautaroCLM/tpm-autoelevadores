@@ -88,6 +88,31 @@ export function checkRateLimit(
 }
 
 /**
+ * Consulta sin registrar un nuevo evento: ¿ya se alcanzó el máximo en la ventana vigente?
+ * Devuelve success=false cuando el conteo actual es >= maxRequests.
+ */
+export function peekRateLimit(key: string, maxRequests: number, windowMs: number): RateLimitResult {
+  const now = Date.now();
+  const existing = rateLimitStore.get(key);
+
+  if (!existing || existing.resetAt <= now) {
+    return {
+      success: true,
+      limit: maxRequests,
+      remaining: maxRequests,
+      resetSeconds: Math.ceil(windowMs / 1000),
+    };
+  }
+
+  return {
+    success: existing.count < maxRequests,
+    limit: maxRequests,
+    remaining: Math.max(0, maxRequests - existing.count),
+    resetSeconds: Math.ceil(Math.max(0, existing.resetAt - now) / 1000),
+  };
+}
+
+/**
  * Extrae la IP de origen confiable de la solicitud HTTP.
  */
 export function getClientIp(req: Request): string {

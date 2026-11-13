@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { checkRateLimit, getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
+import { getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
+import { persistentRateLimit } from '../../../../lib/server/rateLimitStore';
 import { jsonWithCors, preflight } from '../../../../lib/server/http';
 import { emailOperador } from '../../../../lib/utils/pin';
 
@@ -19,13 +20,13 @@ function jsonResponse(data: any, req: Request, status = 200) {
 export async function POST(req: Request) {
   const clientIp = getClientIp(req);
 
-  // 1. LIMITACIÓN DE INTENTOS POR IP (VOLUMÉTRICA)
-  const rateLimitIp = checkRateLimit(`quick_login_ip_${clientIp}`, {
-    maxRequests: 20, // 20 intentos por minuto por IP para admitir redes NAT industriales
-    windowMs: 60 * 1000,
+  // 1. LIMITACIÓN DE INTENTOS POR IP (VOLUMÉTRICA, contador compartido entre instancias)
+  const rateLimitIp = await persistentRateLimit(`quick_login_ip:${clientIp}`, {
+    max: 20, // 20 pedidos por minuto por IP para admitir redes NAT industriales
+    windowSeconds: 60,
   });
 
-  if (!rateLimitIp.success) {
+  if (!rateLimitIp.allowed) {
     logSecurityEvent({
       action: 'AUTH_QUICK_LOGIN',
       ip: clientIp,
@@ -62,11 +63,34 @@ export async function POST(req: Request) {
 
     const cleanLegajo = String(legajo).replace(/^LEG-?/i, '').trim();
 
-    // 2. LIMITACIÓN DE INTENTOS POR CUENTA (ANTI BRUTE-FORCE A LEGAJO ESPECÍFICO)
-    const rateLimitAccount = checkRateLimit(`quick_login_legajo_${cleanLegajo}`, {
-      maxRequests: 5, // Máximo 5 intentos por minuto por cuenta de operario
-      windowMs: 60 * 1000,
-    });
+    // 2. LIMITACIÓN DE INTENTOS FALLIDOS (ANTI BRUTE-FORCE)
+    // Solo cuentan los intentos FALLIDOS; así nadie puede bloquear a un operario mandando
+    // pedidos, y un ingreso correcto no consume el cupo. Dos contadores:
+    //  - desde la misma IP sobre el mismo legajo: 5 fallos cada 5 minutos
+    //  - sobre el legajo desde cualquier IP: 20 fallos cada 15 minutos (frena ataques distribuidos)
+    const LIMITE_IP_LEGAJO = { max: 5, windowSeconds: 300 };
+    const LIMITE_LEGAJO = { max: 20, windowSeconds: 900 };
+    const keyIpLegajo = `quick_login_fail_ip_legajo:${clientIp}:${cleanLegajo}`;
+    const keyLegajo = `quick_login_fail_legajo:${cleanLegajo}`;
+
+    const registrarFallo = async () => {
+      await Promise.all([
+        persistentRateLimit(keyIpLegajo, LIMITE_IP_LEGAJO),
+        persistentRateLimit(keyLegajo, LIMITE_LEGAJO),
+      ]);
+    };
+
+    const [bloqueoIpLegajo, bloqueoLegajo] = await Promise.all([
+      persistentRateLimit(keyIpLegajo, { ...LIMITE_IP_LEGAJO, increment: false }),
+      persistentRateLimit(keyLegajo, { ...LIMITE_LEGAJO, increment: false }),
+    ]);
+    const rateLimitAccount = {
+      success: bloqueoIpLegajo.allowed && bloqueoLegajo.allowed,
+      resetSeconds: Math.max(
+        bloqueoIpLegajo.allowed ? 0 : bloqueoIpLegajo.resetSeconds,
+        bloqueoLegajo.allowed ? 0 : bloqueoLegajo.resetSeconds
+      ),
+    };
 
     if (!rateLimitAccount.success) {
       logSecurityEvent({
@@ -137,6 +161,7 @@ export async function POST(req: Request) {
         outcome: 'REJECTED',
         reason: 'Operador inexistente o no activo',
       });
+      await registrarFallo();
       // Mensaje genérico para evitar enumeración de usuarios
       return jsonResponse({ error: 'Credenciales inválidas para este operador' }, req, 401);
     }
@@ -191,6 +216,7 @@ export async function POST(req: Request) {
           outcome: 'REJECTED',
           reason: 'Token QR no coincide con ningún registro activo',
         });
+        await registrarFallo();
         return jsonResponse(
           { error: 'Credencial QR no válida o no registrada. Por favor ingrese su PIN o consulte al supervisor.' },
           req,
@@ -206,6 +232,7 @@ export async function POST(req: Request) {
           outcome: 'REJECTED',
           reason: 'Token QR se encuentra explícitamente revocado',
         });
+        await registrarFallo();
         return jsonResponse(
           { error: 'Esta credencial QR ha sido revocada. Solicite una nueva tarjeta a su supervisor.' },
           req,
@@ -277,6 +304,7 @@ export async function POST(req: Request) {
           outcome: 'REJECTED',
           reason: 'PIN o contraseña incorrecta',
         });
+        await registrarFallo();
 
         return jsonResponse(
           {

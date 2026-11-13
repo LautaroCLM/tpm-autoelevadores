@@ -60,6 +60,7 @@ import {
   POST as postSupervisorOperadores,
 } from '../app/api/supervisor/operadores/route.ts';
 import { isAllowedOrigin } from '../lib/server/http.ts';
+import { persistentRateLimit } from '../lib/server/rateLimitStore.ts';
 import { validarPin, validarLegajo } from '../lib/utils/pin.ts';
 import crypto from 'crypto';
 
@@ -492,6 +493,53 @@ const legajoBlockedAttempt = checkRateLimit(`quick_login_legajo_${testLegajo}`, 
 assert(
   legajoAttemptsAllowed === 5 && legajoBlockedAttempt.success === false,
   '[REGRESIÓN 10] Limitación independiente por cuenta bloquea el 6to intento fallido consecutivo sobre el mismo legajo',
+  'SECURITY (RATE LIMITING)'
+);
+
+// REGRESIÓN 11: Contador persistente (compartido si la base responde; en memoria si no)
+const keyPers = `test_pers_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const pers1 = await persistentRateLimit(keyPers, { max: 2, windowSeconds: 60 });
+const pers2 = await persistentRateLimit(keyPers, { max: 2, windowSeconds: 60 });
+const pers3 = await persistentRateLimit(keyPers, { max: 2, windowSeconds: 60 });
+assert(
+  pers1.allowed && pers2.allowed && !pers3.allowed,
+  `[REGRESIÓN 11.A] El contador persistente (${pers3.source}) permite 2 eventos y bloquea el 3.º`,
+  'SECURITY (RATE LIMITING)'
+);
+
+const persPeek = await persistentRateLimit(keyPers, { max: 2, windowSeconds: 60, increment: false });
+assert(
+  persPeek.allowed === false,
+  '[REGRESIÓN 11.B] La consulta sin incremento reporta bloqueo una vez alcanzado el máximo',
+  'SECURITY (RATE LIMITING)'
+);
+
+const keyPeekOnly = `test_peek_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+for (let i = 0; i < 4; i++) {
+  await persistentRateLimit(keyPeekOnly, { max: 1, windowSeconds: 60, increment: false });
+}
+const peekDespues = await persistentRateLimit(keyPeekOnly, { max: 1, windowSeconds: 60, increment: false });
+assert(
+  peekDespues.allowed === true,
+  '[REGRESIÓN 11.C] Consultar el estado no consume cupo (no hay bloqueo por solo mirar)',
+  'SECURITY (RATE LIMITING)'
+);
+
+// REGRESIÓN 12: Pedidos sin credencial NO bloquean el legajo (solo cuentan los fallos de credencial)
+let bloqueadoSinFallos = false;
+for (let i = 0; i < 8; i++) {
+  const r = await quickLoginPost(
+    new Request('http://localhost', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '185.220.101.77' },
+      body: JSON.stringify({ legajo: 'legajo_prueba_sin_fallos' }),
+    })
+  );
+  if (r.status === 429) bloqueadoSinFallos = true;
+}
+assert(
+  bloqueadoSinFallos === false,
+  '[REGRESIÓN 12] 8 pedidos sin credencial sobre un legajo no lo bloquean (nadie puede bloquear a un operario enviando pedidos)',
   'SECURITY (RATE LIMITING)'
 );
 
