@@ -112,26 +112,9 @@ export async function POST(req: Request) {
       return response;
     }
 
-    // 3. CONTROL DE SEGURIDAD ESTRICTO: NO SE PERMITE ACCESO SIN CREDENCIAL REAL
-    // El legajo es un identificador público. Jamás constituye prueba de identidad por sí solo.
-    if (!qrToken && !personalPin) {
-      logSecurityEvent({
-        action: 'AUTH_QUICK_LOGIN',
-        ip: clientIp,
-        identifier: cleanLegajo,
-        outcome: 'UNAUTHORIZED',
-        reason: 'Intento de acceso por solo legajo sin token ni PIN',
-      });
-
-      return jsonResponse(
-        {
-          error:
-            'Credencial requerida. El legajo es un identificador público y no constituye prueba de identidad. Escanee una credencial QR autorizada o ingrese su clave/PIN de operador.',
-        },
-        req,
-        401
-      );
-    }
+    // 3. ACCESO DIRECTO: decisión del negocio (app privada de un sector de la empresa).
+    // Sin token ni PIN, el legajo alcanza para entrar como operador (nunca como supervisor:
+    // más abajo solo se resuelven perfiles con rol 'operador').
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -178,6 +161,54 @@ export async function POST(req: Request) {
 
     let userSession: any = null;
     let authUser: any = null;
+
+    // Sesión de Auth sin contraseña (generateLink + verifyOtp), requiere la service key
+    const crearSesionDirecta = async () => {
+      if (!serviceKey) return;
+      const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'magiclink',
+        email,
+      });
+      if (linkErr || !linkData?.properties?.hashed_token) return;
+      const supabaseAuthClient = createClient(url, anonKey || serviceKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: verifyData } = await supabaseAuthClient.auth.verifyOtp({
+        token_hash: linkData.properties.hashed_token,
+        type: 'email',
+      });
+      if (verifyData?.session) {
+        userSession = verifyData.session;
+        authUser = verifyData.user;
+      }
+    };
+
+    // FLUJO DIRECTO: solo legajo
+    if (!qrToken && !personalPin) {
+      await crearSesionDirecta();
+      if (!userSession) {
+        logSecurityEvent({
+          action: 'AUTH_QUICK_LOGIN',
+          ip: clientIp,
+          identifier: cleanLegajo,
+          outcome: 'REJECTED',
+          reason: 'Fallo al generar sesión para acceso directo',
+        });
+        return jsonResponse({ error: 'No se pudo iniciar la sesión. Intente de nuevo.' }, req, 500);
+      }
+      logSecurityEvent({
+        action: 'AUTH_QUICK_LOGIN',
+        ip: clientIp,
+        identifier: cleanLegajo,
+        outcome: 'ALLOWED',
+        reason: 'Acceso directo por legajo',
+      });
+      return jsonResponse(
+        { success: true, email: authUser?.email || email, user: authUser, session: userSession, perfil: perfilExistente },
+        req,
+        200
+      );
+    }
 
     // 4. FLUJO A: AUTENTICACIÓN MEDIANTE CREDENCIAL QR CRIPTOGRÁFICA INDEPENDIENTE
     if (qrToken) {
