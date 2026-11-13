@@ -28,7 +28,8 @@ export interface CachedTemplateRecord {
  */
 export async function saveEquiposCache(equipos: Equipo[]): Promise<void> {
   if (typeof window === 'undefined' || !window.indexedDB) return;
-  if (!Array.isArray(equipos) || equipos.length === 0) return;
+  // Una lista vacía es válida: la respuesta del servidor es la verdad y debe limpiar la caché
+  if (!Array.isArray(equipos)) return;
 
   const db = await openDB();
   return new Promise((resolve, reject) => {

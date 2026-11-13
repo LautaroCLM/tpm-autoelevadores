@@ -35,10 +35,13 @@ import { toast } from 'sonner';
 import { calcularEstadoMantenimiento } from '../../../lib/utils/mantenimiento';
 import { ScrollReveal } from '../../../components/ScrollReveal';
 
+/** Ventana (en horas) dentro de la cual una nueva inspección del mismo equipo se considera repetida. */
+const VENTANA_TURNO_HORAS = 8;
+
 export default function EquipoFichaPage() {
   const params = useParams();
   const router = useRouter();
-  const { user, perfil, loading: authLoading } = useAuth();
+  const { user, perfil, loading: authLoading, isSupervisorOrMaint } = useAuth();
   const rawParam = Array.isArray(params?.qr_codigo) ? params.qr_codigo[0] : (params?.qr_codigo as string);
   const qrCodigo = extractEquipoCode(rawParam);
 
@@ -118,9 +121,27 @@ export default function EquipoFichaPage() {
     diferencia: number;
   } | null>(null);
 
-  const handleStartInspection = (e?: React.FormEvent, isConfirmed = false) => {
+  // Aviso de checklist repetido: ya hay una inspección reciente de este equipo
+  const [duplicadoModal, setDuplicadoModal] = useState<{
+    haceTexto: string;
+    porTexto: string;
+    esMia: boolean;
+    horometro: number;
+  } | null>(null);
+
+  const handleStartInspection = (
+    e?: React.FormEvent,
+    isConfirmed = false,
+    duplicadoConfirmado = false
+  ) => {
     if (e) e.preventDefault();
     if (!equipo) return;
+
+    // Equipo fuera de servicio: los operadores no pueden iniciar el checklist
+    if (equipo.estado === 'fuera_de_servicio' && !isSupervisorOrMaint) {
+      toast.error('Autoelevador fuera de servicio: no se puede iniciar el checklist. Avise a mantenimiento.');
+      return;
+    }
 
     if (!operador) {
       toast.error('Debe iniciar sesión para realizar la inspección');
@@ -148,6 +169,35 @@ export default function EquipoFichaPage() {
         diferencia: numHorometro - equipo.horometro_actual,
       });
       return;
+    }
+
+    // Aviso (no bloqueo) si ya se inspeccionó este equipo dentro de la ventana de un turno.
+    // Solo se puede evaluar con el historial cargado (en línea).
+    if (!duplicadoConfirmado) {
+      const ahora = Date.now();
+      const reciente = inspecciones.find((insp) => {
+        const fecha = new Date(insp.finalizado_en || insp.iniciado_en || 0).getTime();
+        return fecha > 0 && ahora - fecha >= 0 && ahora - fecha < VENTANA_TURNO_HORAS * 60 * 60 * 1000;
+      });
+
+      if (reciente) {
+        const fecha = new Date(reciente.finalizado_en || reciente.iniciado_en || 0).getTime();
+        const minutos = Math.max(1, Math.round((ahora - fecha) / 60000));
+        const haceTexto =
+          minutos < 60 ? `${minutos} min` : `${Math.floor(minutos / 60)} h ${minutos % 60} min`;
+        const esMia = Boolean(operador && operador.id === reciente.operador_id);
+        setDuplicadoModal({
+          haceTexto,
+          esMia,
+          porTexto: reciente.operador_nombre
+            ? `${reciente.operador_nombre}${reciente.operador_legajo ? ` (#${reciente.operador_legajo})` : ''}`
+            : esMia
+            ? 'vos'
+            : 'otro operador',
+          horometro: numHorometro,
+        });
+        return;
+      }
     }
 
     // No transmitimos operadorId por URL: la página de inspección obtiene la identidad real desde la sesión Supabase
@@ -389,6 +439,18 @@ export default function EquipoFichaPage() {
                 Este autoelevador fue dado de baja y no permite iniciar nuevas inspecciones de turno. Si requiere reactivarlo, contacte al supervisor de planta.
               </p>
             </div>
+          ) : equipo.estado === 'fuera_de_servicio' && !isSupervisorOrMaint ? (
+            <div className="p-6 bg-[#0e1420] border-t border-slate-800 text-center space-y-2">
+              <div className="w-10 h-10 rounded-full bg-rose-950/80 border border-rose-500/50 text-rose-400 mx-auto flex items-center justify-center">
+                <ShieldAlert size={20} />
+              </div>
+              <h3 className="font-mono font-bold text-sm text-rose-300 uppercase tracking-wider">
+                CHECKLIST BLOQUEADO: EQUIPO FUERA DE SERVICIO
+              </h3>
+              <p className="text-xs text-slate-400 max-w-md mx-auto">
+                No operes este autoelevador. Avisá a mantenimiento: cuando lo habiliten vas a poder iniciar el checklist.
+              </p>
+            </div>
           ) : (
             <form onSubmit={handleStartInspection} className="p-4 sm:p-6 space-y-4 border-t border-slate-800 bg-[#0e1420]">
 
@@ -550,7 +612,10 @@ export default function EquipoFichaPage() {
                         {/* Indicador Sobrio de Defectos */}
                         {fallas.length === 0 ? (
                           <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-500/40 px-2 py-0.5 rounded">
-                            SIN FALLAS (19/19 OK)
+                            SIN FALLAS
+                            {(insp.respuestas_item?.length || 0) > 0
+                              ? ` (${insp.respuestas_item.length}/${insp.respuestas_item.length} OK)`
+                              : ''}
                           </span>
                         ) : (
                           <span className="text-[10px] font-mono font-bold text-rose-300 bg-rose-950/80 border border-rose-500/60 px-2 py-0.5 rounded">
@@ -792,6 +857,57 @@ export default function EquipoFichaPage() {
         />
       )}
 
+      {/* MODAL DE AVISO: YA EXISTE UNA INSPECCIÓN RECIENTE DE ESTE EQUIPO */}
+      {duplicadoModal && (
+        <ModalPortal>
+          <div
+            onClick={() => setDuplicadoModal(null)}
+            className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto w-screen h-dvh min-h-dvh"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-md w-full bg-[#0e1420] border border-amber-500/60 rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto"
+            >
+              <div className="flex items-center gap-3 border-b border-slate-800 pb-3">
+                <div className="w-10 h-10 rounded bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/40">
+                  <AlertTriangle size={22} />
+                </div>
+                <h3 className="text-base font-bold text-white uppercase tracking-tight font-mono">
+                  ¿Repetir el checklist?
+                </h3>
+              </div>
+
+              <p className="text-sm text-slate-300 leading-relaxed">
+                Este autoelevador ya fue inspeccionado hace{' '}
+                <strong className="text-amber-400">{duplicadoModal.haceTexto}</strong> por{' '}
+                <strong className="text-white">{duplicadoModal.porTexto}</strong>. Si es un nuevo turno
+                o el equipo cambió de operador, podés continuar.
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setDuplicadoModal(null)}
+                  className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 font-mono font-bold text-xs rounded transition cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDuplicadoModal(null);
+                    handleStartInspection(undefined, true, true);
+                  }}
+                  className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-xs rounded transition shadow-md cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
+                >
+                  Continuar igual
+                </button>
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
       {/* MODAL DE CONFIRMACIÓN DE HORÓMETRO ALTO (+100 hs) */}
       {horometroConfirmacionModal && (
         <ModalPortal>
@@ -850,7 +966,7 @@ export default function EquipoFichaPage() {
                   type="button"
                   onClick={() => {
                     setHorometroConfirmacionModal(null);
-                    handleStartInspection(undefined, true);
+                    handleStartInspection(undefined, true, false);
                   }}
                   className="w-full py-3 px-4 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-black text-xs rounded transition shadow-md cursor-pointer min-h-[44px] flex items-center justify-center uppercase"
                 >

@@ -42,22 +42,27 @@ function isSupabaseConfigured(): boolean {
   return Boolean(url && key && !url.includes('placeholder') && !key.includes('placeholder'));
 }
 
+/**
+ * IMPORTANTE: los datos de demostración (mock-db) solo se usan cuando Supabase NO está
+ * configurado (desarrollo local o NEXT_PUBLIC_USE_MOCK=true). Con Supabase configurado jamás
+ * se muestran equipos de ejemplo: ante un error o sin conexión se usa la caché local del
+ * dispositivo y, si no hay, un resultado vacío. Así nadie inspecciona un equipo que no existe.
+ */
 export async function fetchEquipos(incluirDadosDeBaja = false): Promise<Equipo[]> {
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-  if (isOffline) {
-    const cached = await getCachedEquipos();
-    if (cached && cached.length > 0) {
-      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-    }
-    const mock = await getMockEquipos();
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
-  }
+  const aplicarFiltro = (lista: Equipo[]) =>
+    incluirDadosDeBaja ? lista : lista.filter((e) => !e.deleted_at);
 
   if (!isSupabaseConfigured()) {
     const mock = await getMockEquipos();
     saveEquiposCache(mock.filter((e) => !e.deleted_at)).catch(() => {});
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+    return aplicarFiltro(mock);
+  }
+
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const desdeCache = async () => aplicarFiltro((await getCachedEquipos().catch(() => [])) || []);
+
+  if (isOffline) {
+    return await desdeCache();
   }
 
   try {
@@ -74,37 +79,20 @@ export async function fetchEquipos(incluirDadosDeBaja = false): Promise<Equipo[]
     const { data, error } = await query;
 
     if (error) {
-      const cached = await getCachedEquipos().catch(() => []);
-      if (cached && cached.length > 0) {
-        return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-      }
-      const mock = await getMockEquipos();
-      return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+      console.error('Error consultando equipos en Supabase:', error);
+      return await desdeCache();
     }
 
     const equipos = (data || []) as Equipo[];
-    if (equipos.length > 0) {
-      // Guardar en la caché local únicamente equipos activos para seguridad offline
-      const activos = equipos.filter((e) => !e.deleted_at);
-      saveEquiposCache(activos).catch((e) =>
-        console.warn('No se pudo guardar la caché de equipos:', e)
-      );
-      return equipos;
-    }
-
-    const cached = await getCachedEquipos().catch(() => []);
-    if (cached && cached.length > 0) {
-      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-    }
-    const mock = await getMockEquipos();
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+    // La respuesta del servidor es la verdad: si no hay equipos, no hay equipos.
+    // Se guarda en la caché local únicamente lo activo para uso offline.
+    saveEquiposCache(equipos.filter((e) => !e.deleted_at)).catch((e) =>
+      console.warn('No se pudo guardar la caché de equipos:', e)
+    );
+    return equipos;
   } catch (err: any) {
-    const cached = await getCachedEquipos().catch(() => []);
-    if (cached && cached.length > 0) {
-      return incluirDadosDeBaja ? cached : cached.filter((e) => !e.deleted_at);
-    }
-    const mock = await getMockEquipos();
-    return incluirDadosDeBaja ? mock : mock.filter((e) => !e.deleted_at);
+    console.error('Error de conexión consultando equipos:', err);
+    return await desdeCache();
   }
 }
 
@@ -112,16 +100,15 @@ export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> 
   const cleanCode = extractEquipoCode(qrCodigo);
   if (!cleanCode) return null;
 
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-  if (isOffline) {
-    const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
-    if (cached) return cached;
+  if (!isSupabaseConfigured()) {
     return await getMockEquipoByQR(cleanCode);
   }
 
-  if (!isSupabaseConfigured()) {
-    return await getMockEquipoByQR(cleanCode);
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const desdeCache = () => getCachedEquipoByQR(cleanCode).catch(() => null);
+
+  if (isOffline) {
+    return await desdeCache();
   }
 
   try {
@@ -132,33 +119,31 @@ export async function fetchEquipoByQR(qrCodigo: string): Promise<Equipo | null> 
       .or(`qr_codigo.ilike.${cleanCode},interno.eq.${cleanCode}`)
       .maybeSingle();
 
-    if (error || !data) {
-      const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
-      if (cached) return cached;
-      return await getMockEquipoByQR(cleanCode);
+    if (error) {
+      console.error('Error consultando equipo por QR:', error);
+      return await desdeCache();
     }
 
-    return data as Equipo;
+    // Sin error y sin fila: el equipo no existe (no usar caché desactualizada ni datos de ejemplo)
+    return (data as Equipo | null) ?? null;
   } catch (err: any) {
-    const cached = await getCachedEquipoByQR(cleanCode).catch(() => null);
-    if (cached) return cached;
-    return await getMockEquipoByQR(cleanCode);
+    console.error('Error de conexión consultando equipo por QR:', err);
+    return await desdeCache();
   }
 }
 
 export async function fetchEquipoById(id: string): Promise<Equipo | null> {
   if (!id) return null;
 
-  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
-
-  if (isOffline) {
-    const cached = await getCachedEquipoById(id).catch(() => null);
-    if (cached) return cached;
+  if (!isSupabaseConfigured()) {
     return await getMockEquipoById(id);
   }
 
-  if (!isSupabaseConfigured()) {
-    return await getMockEquipoById(id);
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const desdeCache = () => getCachedEquipoById(id).catch(() => null);
+
+  if (isOffline) {
+    return await desdeCache();
   }
 
   try {
@@ -169,17 +154,15 @@ export async function fetchEquipoById(id: string): Promise<Equipo | null> {
       .eq('id', id)
       .maybeSingle();
 
-    if (error || !data) {
-      const cached = await getCachedEquipoById(id).catch(() => null);
-      if (cached) return cached;
-      return await getMockEquipoById(id);
+    if (error) {
+      console.error('Error consultando equipo por ID:', error);
+      return await desdeCache();
     }
 
-    return data as Equipo;
+    return (data as Equipo | null) ?? null;
   } catch (err: any) {
-    const cached = await getCachedEquipoById(id).catch(() => null);
-    if (cached) return cached;
-    return await getMockEquipoById(id);
+    console.error('Error de conexión consultando equipo por ID:', err);
+    return await desdeCache();
   }
 }
 
