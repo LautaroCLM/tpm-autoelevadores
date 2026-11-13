@@ -842,7 +842,8 @@ export async function updateEquipo(
 
   if (error) {
     console.error('Error updating equipo in Supabase:', error);
-    return { success: false, error: error.message };
+    // Los errores de validación de la base vienen como "CODIGO: mensaje": se muestra solo el mensaje
+    return { success: false, error: String(error.message || '').replace(/^[A-Z_]+:\s*/, '') };
   }
 
   if (!data || data.length === 0) {
