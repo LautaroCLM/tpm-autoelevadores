@@ -1,5 +1,6 @@
 import crypto from 'crypto';
-import { checkRateLimit, getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
+import { getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
+import { persistentRateLimit } from '../../../../lib/server/rateLimitStore';
 import { jsonWithCors, preflight } from '../../../../lib/server/http';
 import {
   verifySupervisorAuth as verifySupervisor,
@@ -79,12 +80,12 @@ export async function POST(req: Request) {
   }
 
   // Rate limiting para operaciones administrativas
-  const rateLimit = checkRateLimit(`supervisor_qr_${clientIp}`, {
-    maxRequests: 30,
-    windowMs: 60 * 1000,
+  const rateLimit = await persistentRateLimit(`supervisor_qr:${clientIp}`, {
+    max: 30,
+    windowSeconds: 60,
   });
 
-  if (!rateLimit.success) {
+  if (!rateLimit.allowed) {
     return jsonResponse(
       { error: `Límite de operaciones administrativas excedido. Espere ${rateLimit.resetSeconds} segundos.` },
       req,

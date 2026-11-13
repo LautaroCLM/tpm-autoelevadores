@@ -1,4 +1,5 @@
-import { checkRateLimit, getClientIp } from '../../../lib/utils/rateLimit';
+import { getClientIp } from '../../../lib/utils/rateLimit';
+import { persistentRateLimit } from '../../../lib/server/rateLimitStore';
 import { jsonWithCors, preflight } from '../../../lib/server/http';
 import { createAdminClient, getServerSupabaseEnv } from '../../../lib/server/supervisorAuth';
 
@@ -15,13 +16,14 @@ export async function OPTIONS(req: Request) {
  *
  * Lista pública y mínima de operadores para los botones de "Accesos Rápidos" del
  * terminal de planta (antes de iniciar sesión). Solo devuelve nombre y legajo:
- * nunca UUIDs, roles ni datos de supervisores. El legajo es un identificador
- * público; para entrar siempre se exige PIN o tarjeta QR con token.
+ * nunca UUIDs, roles ni datos de supervisores. Con el acceso directo, elegir
+ * un nombre de esta lista alcanza para entrar como operador (decisión del negocio).
  */
 export async function GET(req: Request) {
   const clientIp = getClientIp(req);
-  const rl = checkRateLimit(`operadores_list_${clientIp}`, { maxRequests: 60, windowMs: 60 * 1000 });
-  if (!rl.success) {
+  // Límite compartido entre instancias (tabla rate_limits); cae a memoria si la base no responde
+  const rl = await persistentRateLimit(`operadores_list:${clientIp}`, { max: 60, windowSeconds: 60 });
+  if (!rl.allowed) {
     return jsonWithCors({ error: 'Demasiadas solicitudes. Reintente en unos segundos.' }, req, METHODS, 429, {
       'Retry-After': String(rl.resetSeconds),
     });
