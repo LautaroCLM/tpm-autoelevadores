@@ -45,6 +45,43 @@ export interface EquipoAuditoria {
   creado_en: string;
 }
 
+/** Un cambio dentro de una reedición de inspección. */
+export interface CambioEdicionInspeccion {
+  tipo: 'cabecera' | 'respuesta' | 'falla';
+  campo: string;
+  etiqueta: string;
+  seccion?: string;
+  item_id?: string;
+  antes: unknown;
+  despues: unknown;
+}
+
+/** Una reedición de una inspección hecha por supervisión (tabla inspecciones_ediciones). */
+export interface EdicionInspeccion {
+  id: string;
+  inspeccion_id: string;
+  equipo_id: string;
+  editor_id: string | null;
+  editor_nombre: string | null;
+  motivo: string;
+  cambios: CambioEdicionInspeccion[];
+  creado_en: string;
+}
+
+/** Cambios que se envían al editar una inspección. */
+export interface CambiosInspeccion {
+  horometro?: number;
+  estado_resultante?: EstadoEquipo;
+  respuestas?: {
+    item_id: string;
+    valor_bool?: boolean | null;
+    valor_numero?: number | null;
+    valor_texto?: string | null;
+    es_falla?: boolean;
+    falla?: { gravedad?: GravedadFalla; descripcion?: string };
+  }[];
+}
+
 export interface ChecklistItemResponse {
   item_id: string;
   valor_bool: boolean | null;

@@ -136,6 +136,8 @@ export type Database = {
           iniciado_en: string;
           finalizado_en: string | null;
           estado_resultante: 'operativo' | 'observado' | 'fuera_de_servicio' | null;
+          editada_en: string | null;
+          editada_por: string | null;
         };
         Insert: {
           id?: string;
@@ -147,6 +149,8 @@ export type Database = {
           iniciado_en?: string;
           finalizado_en?: string | null;
           estado_resultante?: 'operativo' | 'observado' | 'fuera_de_servicio' | null;
+          editada_en?: string | null;
+          editada_por?: string | null;
         };
         Update: {
           id?: string;
@@ -158,6 +162,8 @@ export type Database = {
           iniciado_en?: string;
           finalizado_en?: string | null;
           estado_resultante?: 'operativo' | 'observado' | 'fuera_de_servicio' | null;
+          editada_en?: string | null;
+          editada_por?: string | null;
         };
       };
       respuestas_item: {

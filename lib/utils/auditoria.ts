@@ -54,3 +54,31 @@ export function formatearValorAuditoria(campo: string, valor: unknown): string {
   }
   return String(valor);
 }
+
+// ---------------------------------------------------------------------------
+// Reedición de inspecciones
+// ---------------------------------------------------------------------------
+
+export const ETIQUETA_CAMPO_CAMBIO_INSPECCION: Record<string, string> = {
+  horometro: 'Horómetro',
+  estado_resultante: 'Estado resultante',
+  valor_bool: 'Resultado',
+  valor_numero: 'Valor',
+  valor_texto: 'Observación',
+  falla: 'Falla',
+  falla_gravedad: 'Gravedad de la falla',
+  falla_descripcion: 'Descripción de la falla',
+};
+
+/** Texto legible del valor (antes/después) de un cambio registrado en una reedición. */
+export function formatearValorCambioInspeccion(campo: string, valor: unknown): string {
+  if (valor === null || valor === undefined || valor === '') return '—';
+  if (campo === 'valor_bool') return valor === true ? 'OK' : 'No OK';
+  if (campo === 'estado_resultante' && typeof valor === 'string') {
+    return ETIQUETA_ESTADO[valor] ?? valor;
+  }
+  if (campo === 'falla_gravedad' && typeof valor === 'string') {
+    return valor.charAt(0).toUpperCase() + valor.slice(1);
+  }
+  return String(valor);
+}
