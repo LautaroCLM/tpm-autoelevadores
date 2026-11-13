@@ -61,6 +61,7 @@ import {
 } from '../app/api/supervisor/operadores/route.ts';
 import { isAllowedOrigin } from '../lib/server/http.ts';
 import { persistentRateLimit } from '../lib/server/rateLimitStore.ts';
+import { buscarInspeccionReciente, textoHace } from '../lib/utils/duplicados.ts';
 import { formatearValorAuditoria, formatearValorCambioInspeccion } from '../lib/utils/auditoria.ts';
 import { validarPin, validarLegajo } from '../lib/utils/pin.ts';
 import crypto from 'crypto';
@@ -538,6 +539,31 @@ assert(formatearValorCambioInspeccion('valor_bool', false) === 'No OK', '[REEDIC
 assert(formatearValorCambioInspeccion('estado_resultante', 'observado') === 'Observado', '[REEDICIÓN] el estado se traduce a texto', 'UNIT (PROD CODE)');
 assert(formatearValorCambioInspeccion('falla_gravedad', 'media') === 'Media', '[REEDICIÓN] la gravedad se capitaliza', 'UNIT (PROD CODE)');
 assert(formatearValorCambioInspeccion('valor_texto', null) === '—', '[REEDICIÓN] un valor vacío se muestra como guion', 'UNIT (PROD CODE)');
+
+// AVISO DE CHECKLIST REPETIDO (también sin conexión)
+{
+  const H = 60 * 60 * 1000;
+  const ahora = 1_800_000_000_000;
+  const ventana = 8 * H;
+  const r1 = buscarInspeccionReciente([{ fecha: ahora - 2 * H, operador_id: 'a' }], ahora, ventana);
+  assert(r1 !== null, '[DUPLICADO] Una inspección de hace 2 h dentro de la ventana de 8 h se detecta', 'UNIT (PROD CODE)');
+  const r2 = buscarInspeccionReciente([{ fecha: ahora - 9 * H, operador_id: 'a' }], ahora, ventana);
+  assert(r2 === null, '[DUPLICADO] Una inspección de hace 9 h ya no cuenta', 'UNIT (PROD CODE)');
+  const r3 = buscarInspeccionReciente([{ fecha: ahora + H, operador_id: 'a' }], ahora, ventana);
+  assert(r3 === null, '[DUPLICADO] Una fecha futura (reloj desfasado) se ignora', 'UNIT (PROD CODE)');
+  const r4 = buscarInspeccionReciente(
+    [
+      { fecha: ahora - 5 * H, operador_id: 'a' },
+      { fecha: ahora - 1 * H, operador_id: 'b' },
+      { fecha: Number.NaN, operador_id: 'c' },
+    ],
+    ahora,
+    ventana
+  );
+  assert(r4?.operador_id === 'b', '[DUPLICADO] Entre varias, se elige la más reciente y se ignoran fechas inválidas', 'UNIT (PROD CODE)');
+  assert(buscarInspeccionReciente([], ahora, ventana) === null, '[DUPLICADO] Sin candidatas no hay aviso', 'UNIT (PROD CODE)');
+  assert(textoHace(25 * 60000) === '25 min' && textoHace(125 * 60000) === '2 h 5 min', '[DUPLICADO] El texto de "hace cuánto" es legible', 'UNIT (PROD CODE)');
+}
 
 // REGRESIÓN 12: Con acceso directo, probar muchos legajos inexistentes desde una IP se frena (anti enumeración)
 let bloqueadoSinFallos = false;

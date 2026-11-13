@@ -26,6 +26,7 @@ import {
   eliminarMockFallaDefinitiva,
 } from '../data/mock-db';
 import { enqueueInspeccion } from '../offline/queue';
+import { guardarUltimaInspeccionLocal } from '../offline/ultima-inspeccion';
 import {
   saveEquiposCache,
   getCachedEquipos,
@@ -417,6 +418,10 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
     }
 
     const rpcResult = data as { success: boolean; inspeccion_id: string; idempotent?: boolean } | null;
+    guardarUltimaInspeccionLocal(payload.equipo_id, {
+      fecha: new Date(payload.finalizado_en || Date.now()).getTime(),
+      operador_id: payload.operador_id,
+    });
     return {
       success: true,
       inspeccionId: rpcResult?.inspeccion_id,
@@ -429,6 +434,10 @@ export async function submitInspeccion(payload: InspeccionPayload): Promise<{
     if (isNetworkError(err)) {
       try {
         await enqueueInspeccion(payload);
+        guardarUltimaInspeccionLocal(payload.equipo_id, {
+          fecha: new Date(payload.finalizado_en || Date.now()).getTime(),
+          operador_id: payload.operador_id,
+        });
         return {
           success: false,
           queuedOffline: true,
