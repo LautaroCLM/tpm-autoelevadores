@@ -76,7 +76,8 @@ export async function updateSession(request: NextRequest) {
     if (isProtectedOperationalRoute && !isSessionValidToday) {
       const targetPath = currentPath + request.nextUrl.search;
       const redirectUrl = request.nextUrl.clone();
-      redirectUrl.pathname = '/login';
+      // Los operadores entran por el acceso rápido del home (no por el login de administrador)
+      redirectUrl.pathname = '/';
       redirectUrl.search = '';
       redirectUrl.searchParams.set('redirect', sanitizeRedirectUrl(targetPath, '/'));
 
