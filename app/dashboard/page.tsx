@@ -314,6 +314,27 @@ export default function SupervisorDashboardPage() {
     e.preventDefault();
     if (!editEquipo) return;
 
+    // Validación del horómetro antes de guardar (la base también la aplica)
+    const nuevoHorometro = editEquipo.horometro_actual as unknown;
+    if (typeof nuevoHorometro !== 'number' || !Number.isFinite(nuevoHorometro) || nuevoHorometro < 0) {
+      toast.error('Ingresá un horómetro válido (número igual o mayor a 0).');
+      return;
+    }
+    const original = equipos.find((eq) => eq.id === editEquipo.id);
+    if (original && nuevoHorometro < original.horometro_actual) {
+      const seguir = window.confirm(
+        `Vas a BAJAR el horómetro de ${original.horometro_actual} a ${nuevoHorometro} hs.\n\n` +
+          'Solo se permite si no queda por debajo de lo registrado en inspecciones. ¿Continuar?'
+      );
+      if (!seguir) return;
+    } else if (original && nuevoHorometro > original.horometro_actual + 100) {
+      const seguir = window.confirm(
+        `El horómetro sube ${(nuevoHorometro - original.horometro_actual).toFixed(1)} hs de golpe ` +
+          `(de ${original.horometro_actual} a ${nuevoHorometro}). ¿Es correcto?`
+      );
+      if (!seguir) return;
+    }
+
     setSubmittingForm(true);
     try {
       const res = await updateEquipo(editEquipo.id, {
@@ -1519,7 +1540,11 @@ export default function SupervisorDashboardPage() {
                       inputMode="decimal"
                       value={editEquipo.horometro_actual}
                       onChange={(e) =>
-                        setEditEquipo({ ...editEquipo, horometro_actual: parseFloat(e.target.value) || 0 })
+                        // Vacío queda vacío (se valida al guardar): antes se convertía en 0 sin avisar
+                        setEditEquipo({
+                          ...editEquipo,
+                          horometro_actual: (e.target.value === '' ? '' : parseFloat(e.target.value)) as number,
+                        })
                       }
                       className="w-full bg-[#0B0F17] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white font-mono font-tabular focus:border-amber-500 focus:outline-none"
                     />
