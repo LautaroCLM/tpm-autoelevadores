@@ -48,7 +48,7 @@ export default function MiPerfilPage() {
     if (authLoading) return;
 
     if (!user || !perfil) {
-      router.replace('/login?redirect=/perfil');
+      router.replace('/?redirect=/perfil');
       return;
     }
 

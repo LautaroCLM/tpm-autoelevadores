@@ -4,6 +4,12 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { fetchEquipoByQR, fetchInspeccionesByEquipo } from '../../../lib/api/tpm';
+import { getQueuedInspecciones } from '../../../lib/offline/queue';
+import {
+  guardarUltimaInspeccionLocal,
+  leerUltimaInspeccionLocal,
+} from '../../../lib/offline/ultima-inspeccion';
+import { buscarInspeccionReciente, textoHace, type InspeccionReciente } from '../../../lib/utils/duplicados';
 import { useAuth } from '../../../components/AuthProvider';
 import { Equipo, Perfil, InspeccionConDetalle } from '../../../lib/types/tpm';
 import { StatusBadge } from '../../../components/StatusBadge';
@@ -63,7 +69,7 @@ export default function EquipoFichaPage() {
         if (!user) {
           // No autenticado: preservar destino y redirigir a /login
           const targetPath = `/equipo/${encodeURIComponent(qrCodigo)}`;
-          router.replace(`/login?redirect=${encodeURIComponent(targetPath)}`);
+          router.replace(`/?redirect=${encodeURIComponent(targetPath)}`);
           return;
         }
 
@@ -82,6 +88,15 @@ export default function EquipoFichaPage() {
                 setLoadingInspecciones(true);
                 const history = await fetchInspeccionesByEquipo(eqData.id);
                 setInspecciones(history);
+                const ultima = history[0];
+                if (ultima) {
+                  guardarUltimaInspeccionLocal(eqData.id, {
+                    fecha: new Date(ultima.finalizado_en || ultima.iniciado_en || 0).getTime(),
+                    operador_id: ultima.operador_id,
+                    nombre: ultima.operador_nombre,
+                    legajo: ultima.operador_legajo,
+                  });
+                }
               } catch (histErr) {
                 console.error('Error fetching historial de inspecciones:', histErr);
               } finally {
@@ -145,7 +160,7 @@ export default function EquipoFichaPage() {
 
     if (!operador) {
       toast.error('Debe iniciar sesión para realizar la inspección');
-      router.push(`/login?redirect=${encodeURIComponent(`/equipo/${qrCodigo}`)}`);
+      router.push(`/?redirect=${encodeURIComponent(`/equipo/${qrCodigo}`)}`);
       return;
     }
 
@@ -172,32 +187,51 @@ export default function EquipoFichaPage() {
     }
 
     // Aviso (no bloqueo) si ya se inspeccionó este equipo dentro de la ventana de un turno.
-    // Solo se puede evaluar con el historial cargado (en línea).
+    // Se evalúa con el historial del servidor (en línea) y con lo que recuerda este dispositivo:
+    // inspecciones pendientes de sincronizar y la última conocida (sirve sin conexión).
     if (!duplicadoConfirmado) {
-      const ahora = Date.now();
-      const reciente = inspecciones.find((insp) => {
-        const fecha = new Date(insp.finalizado_en || insp.iniciado_en || 0).getTime();
-        return fecha > 0 && ahora - fecha >= 0 && ahora - fecha < VENTANA_TURNO_HORAS * 60 * 60 * 1000;
-      });
+      void (async () => {
+        const candidatas: InspeccionReciente[] = inspecciones.map((insp) => ({
+          fecha: new Date(insp.finalizado_en || insp.iniciado_en || 0).getTime(),
+          operador_id: insp.operador_id,
+          nombre: insp.operador_nombre,
+          legajo: insp.operador_legajo,
+        }));
+        const local = leerUltimaInspeccionLocal(equipo.id);
+        if (local) candidatas.push(local);
+        try {
+          const cola = await getQueuedInspecciones();
+          for (const item of cola) {
+            if (item.payload.equipo_id !== equipo.id) continue;
+            candidatas.push({
+              fecha: new Date(item.payload.finalizado_en || item.timestamp).getTime(),
+              operador_id: item.payload.operador_id,
+            });
+          }
+        } catch {
+          // sin acceso a la cola local: se evalúa con el resto
+        }
 
-      if (reciente) {
-        const fecha = new Date(reciente.finalizado_en || reciente.iniciado_en || 0).getTime();
-        const minutos = Math.max(1, Math.round((ahora - fecha) / 60000));
-        const haceTexto =
-          minutos < 60 ? `${minutos} min` : `${Math.floor(minutos / 60)} h ${minutos % 60} min`;
-        const esMia = Boolean(operador && operador.id === reciente.operador_id);
-        setDuplicadoModal({
-          haceTexto,
-          esMia,
-          porTexto: reciente.operador_nombre
-            ? `${reciente.operador_nombre}${reciente.operador_legajo ? ` (#${reciente.operador_legajo})` : ''}`
-            : esMia
-            ? 'vos'
-            : 'otro operador',
-          horometro: numHorometro,
-        });
-        return;
-      }
+        const ahora = Date.now();
+        const reciente = buscarInspeccionReciente(candidatas, ahora, VENTANA_TURNO_HORAS * 60 * 60 * 1000);
+        if (reciente) {
+          const esMia = Boolean(operador && operador.id === reciente.operador_id);
+          setDuplicadoModal({
+            haceTexto: textoHace(ahora - reciente.fecha),
+            esMia,
+            porTexto: reciente.nombre
+              ? `${reciente.nombre}${reciente.legajo ? ` (#${reciente.legajo})` : ''}`
+              : esMia
+              ? 'vos'
+              : 'otro operador',
+            horometro: numHorometro,
+          });
+          return;
+        }
+        const q = new URLSearchParams({ horometro: numHorometro.toString() });
+        router.push(`/inspeccion/${equipo.id}?${q.toString()}`);
+      })();
+      return;
     }
 
     // No transmitimos operadorId por URL: la página de inspección obtiene la identidad real desde la sesión Supabase
