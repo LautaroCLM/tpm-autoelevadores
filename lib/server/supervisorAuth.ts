@@ -25,6 +25,28 @@ export function createAdminClient(url: string, serviceKey: string) {
 }
 
 /**
+ * Cierra todas las sesiones de Auth de un usuario (función SQL `cerrar_sesiones_usuario`).
+ * Devuelve false si no se pudo (p. ej. la migración todavía no está aplicada): quien llama
+ * decide cómo informarlo, pero nunca debe fallar la operación principal por esto.
+ *
+ * Límite: los tokens de acceso ya emitidos siguen siendo válidos para la API de datos hasta
+ * que vencen (1 hora por defecto); lo que se corta de inmediato es la renovación de sesión.
+ */
+export async function cerrarSesionesUsuario(admin: SupabaseClient, userId: string): Promise<boolean> {
+  try {
+    const { error } = await admin.rpc('cerrar_sesiones_usuario', { p_user_id: userId });
+    if (error) {
+      console.warn('No se pudieron cerrar las sesiones del usuario:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Error cerrando sesiones del usuario:', err);
+    return false;
+  }
+}
+
+/**
  * Valida que la petición venga de un usuario autenticado con rol 'supervisor' o 'mantenimiento'.
  * El rol se lee de public.perfiles (nunca de user_metadata, que el usuario puede modificar).
  */

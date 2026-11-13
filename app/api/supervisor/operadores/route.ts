@@ -1,6 +1,6 @@
 import { checkRateLimit, getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
 import { jsonWithCors, preflight } from '../../../../lib/server/http';
-import { verifySupervisorAuth } from '../../../../lib/server/supervisorAuth';
+import { verifySupervisorAuth, cerrarSesionesUsuario } from '../../../../lib/server/supervisorAuth';
 import { emailOperador, validarLegajo, validarPin } from '../../../../lib/utils/pin';
 
 export const dynamic = 'force-dynamic';
@@ -156,13 +156,16 @@ export async function POST(req: Request) {
       return json({ error: 'No se pudo actualizar el PIN' }, req, 500);
     }
 
+    // Un PIN nuevo suele significar que el anterior se filtró: cerrar las sesiones abiertas
+    const sesionesCerradas = await cerrarSesionesUsuario(admin, operador.id);
+
     logSecurityEvent({
       action: 'OPERADOR_SET_PIN',
       ip: clientIp,
       identifier: operador.legajo || undefined,
       outcome: 'ALLOWED',
     });
-    return json({ success: true }, req);
+    return json({ success: true, sesionesCerradas }, req);
   }
 
   return json({ error: 'Acción no válida. Valores permitidos: crear, set_pin' }, req, 400);

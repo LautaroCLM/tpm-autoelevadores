@@ -16,17 +16,26 @@
 -- 5. Crear la función 'validar_operador_qr_token' accesible solo para service_role.
 -- ==============================================================================
 
--- 1. Eliminar política pública anónima permisiva en perfiles
+-- 1. Eliminar TODAS las políticas de lectura abiertas en perfiles.
+--    "Perfiles lectura" (USING true, rol público) venía del esquema inicial y dejaba leer
+--    todos los perfiles, supervisores incluidos, con solo la clave anónima.
 DROP POLICY IF EXISTS "perfiles_public_select_operadores" ON public.perfiles;
+DROP POLICY IF EXISTS "Perfiles lectura" ON public.perfiles;
 
--- 2. Asegurar que SELECT directo en public.perfiles requiera autenticación
+-- 2. Lectura directa de public.perfiles solo para usuarios autenticados y con alcance mínimo:
+--    cada uno su propia fila, los operadores (la bitácora muestra quién inspeccionó cada
+--    equipo) y la supervisión todo. Los operadores ya no ven los perfiles de supervisores.
 DROP POLICY IF EXISTS "perfiles_select" ON public.perfiles;
 DROP POLICY IF EXISTS "perfiles_authenticated_select" ON public.perfiles;
 
 CREATE POLICY "perfiles_authenticated_select" ON public.perfiles
   FOR SELECT
   TO authenticated
-  USING (true);
+  USING (
+    auth.uid() = id
+    OR rol = 'operador'
+    OR public.is_supervisor_or_maint()
+  );
 
 -- 3. Función RPC para selector de operarios (restringida a usuarios autenticados)
 CREATE OR REPLACE FUNCTION public.get_operadores_selector()

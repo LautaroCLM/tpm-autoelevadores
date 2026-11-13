@@ -161,11 +161,15 @@ export function OperadoresAdminPanel() {
     }
     setGuardandoPin(true);
     try {
-      await authFetch('/api/supervisor/operadores', {
+      const res = await authFetch<{ sesionesCerradas?: boolean }>('/api/supervisor/operadores', {
         method: 'POST',
         body: JSON.stringify({ action: 'set_pin', operador_id: pinTarget.id, pin: pin1.trim() }),
       });
-      toast.success(`PIN actualizado para ${pinTarget.nombre}`);
+      toast.success(
+        res.sesionesCerradas
+          ? `PIN actualizado para ${pinTarget.nombre}. Sus sesiones abiertas se cerraron.`
+          : `PIN actualizado para ${pinTarget.nombre}`
+      );
       setPinTarget(null);
       setPin1('');
       setPin2('');
@@ -202,11 +206,15 @@ export function OperadoresAdminPanel() {
     }
     setBusyId(op.id);
     try {
-      await authFetch('/api/supervisor/credenciales-qr', {
+      const res = await authFetch<{ sesionesCerradas?: boolean }>('/api/supervisor/credenciales-qr', {
         method: 'POST',
         body: JSON.stringify({ action: 'revoke', operador_id: op.id }),
       });
-      toast.success(`Tarjeta QR de ${op.nombre} revocada`);
+      toast.success(
+        res.sesionesCerradas
+          ? `Tarjeta QR de ${op.nombre} revocada y sus sesiones abiertas cerradas`
+          : `Tarjeta QR de ${op.nombre} revocada. No se pudieron cerrar sus sesiones abiertas: durarán hasta fin de jornada.`
+      );
       await cargar();
     } catch (err: any) {
       toast.error(err?.message || 'No se pudo revocar la tarjeta');
@@ -413,7 +421,7 @@ export function OperadoresAdminPanel() {
               </div>
             </div>
             <p className="text-[11px] text-slate-500">
-              El PIN anterior deja de funcionar al guardar. Las sesiones abiertas siguen hasta el fin de la jornada.
+              El PIN anterior deja de funcionar al guardar y se cierran las sesiones abiertas del operador.
             </p>
             <button
               type="submit"

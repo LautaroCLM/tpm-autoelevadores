@@ -1,7 +1,10 @@
 import crypto from 'crypto';
 import { checkRateLimit, getClientIp, logSecurityEvent } from '../../../../lib/utils/rateLimit';
 import { jsonWithCors, preflight } from '../../../../lib/server/http';
-import { verifySupervisorAuth as verifySupervisor } from '../../../../lib/server/supervisorAuth';
+import {
+  verifySupervisorAuth as verifySupervisor,
+  cerrarSesionesUsuario,
+} from '../../../../lib/server/supervisorAuth';
 
 export const dynamic = 'force-dynamic';
 
@@ -202,23 +205,21 @@ export async function POST(req: Request) {
         return jsonResponse({ error: 'Error al revocar credencial' }, req, 500);
       }
 
-      // Cerrar sesiones activas en GoTrue para forzar reautenticación
-      try {
-        await authCheck.supabaseAdmin!.auth.admin.signOut(operador.id);
-      } catch (signOutErr) {
-        console.warn('Aviso: no se pudo invalidar la sesión activa de GoTrue al revocar:', signOutErr);
-      }
+      // Cerrar las sesiones abiertas del operario para forzar un nuevo ingreso
+      const sesionesCerradas = await cerrarSesionesUsuario(authCheck.supabaseAdmin!, operador.id);
 
       logSecurityEvent({
         action: 'QR_CREDENTIAL_REVOKE',
         ip: clientIp,
         identifier: operador.legajo,
         outcome: 'ALLOWED',
+        reason: sesionesCerradas ? undefined : 'No se pudieron cerrar las sesiones abiertas',
       });
 
       return jsonResponse(
         {
           success: true,
+          sesionesCerradas,
           message: `Credenciales QR del operario #${operador.legajo} revocadas exitosamente.`,
         },
         req,
