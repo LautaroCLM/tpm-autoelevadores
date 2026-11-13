@@ -309,6 +309,8 @@ export async function saveMockInspeccion(payload: InspeccionPayload): Promise<{ 
     iniciado_en: payload.iniciado_en,
     finalizado_en: payload.finalizado_en,
     estado_resultante: payload.estado_resultante,
+    editada_en: null,
+    editada_por: null,
   };
 
   memoryInspecciones.unshift(newInspeccion);

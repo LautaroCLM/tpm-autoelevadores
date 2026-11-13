@@ -8,6 +8,8 @@ import {
   InspeccionPayload,
   InspeccionConDetalle,
   EquipoAuditoria,
+  EdicionInspeccion,
+  CambiosInspeccion,
 } from '../types/tpm';
 import {
   getMockEquipos,
@@ -899,6 +901,79 @@ export async function fetchHistorialEquipo(equipoId: string, limite = 100): Prom
   }
 
   return (data || []) as EquipoAuditoria[];
+}
+
+/** Nombres de perfiles por id (para mostrar quién hizo cada cosa). */
+export async function fetchNombresPerfiles(): Promise<Record<string, { nombre: string; legajo: string | null }>> {
+  if (!isSupabaseConfigured()) return {};
+  const supabase = createClient();
+  const { data } = await (supabase.from('perfiles') as any).select('id, nombre, legajo');
+  const mapa: Record<string, { nombre: string; legajo: string | null }> = {};
+  for (const p of (data || []) as any[]) mapa[p.id] = { nombre: p.nombre, legajo: p.legajo ?? null };
+  return mapa;
+}
+
+/** Inspección con todas sus respuestas y fallas (ordenadas por el orden del checklist). */
+export async function fetchInspeccionDetalle(id: string): Promise<InspeccionConDetalle | null> {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('inspecciones')
+    .select('*, respuestas_item ( *, checklist_items (*), fallas (*) )')
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) throw new Error(`Error al consultar la inspección: ${error.message}`);
+  if (!data) return null;
+
+  const insp: any = data;
+  insp.respuestas_item = (insp.respuestas_item || []).sort(
+    (a: any, b: any) => (a.checklist_items?.orden ?? 999) - (b.checklist_items?.orden ?? 999)
+  );
+  const nombres = await fetchNombresPerfiles();
+  insp.operador_nombre = nombres[insp.operador_id]?.nombre;
+  insp.operador_legajo = nombres[insp.operador_id]?.legajo || undefined;
+  return insp as InspeccionConDetalle;
+}
+
+/** Historial de reediciones de una inspección (solo supervisión y mantenimiento). */
+export async function fetchEdicionesInspeccion(inspeccionId: string): Promise<EdicionInspeccion[]> {
+  if (!inspeccionId || !isSupabaseConfigured()) return [];
+  const supabase = createClient();
+  const { data, error } = await (supabase.from('inspecciones_ediciones') as any)
+    .select('id, inspeccion_id, equipo_id, editor_id, editor_nombre, motivo, cambios, creado_en')
+    .eq('inspeccion_id', inspeccionId)
+    .order('creado_en', { ascending: false });
+
+  if (error) throw new Error(`Error al consultar el historial de ediciones: ${error.message}`);
+  return (data || []) as EdicionInspeccion[];
+}
+
+/** Edita una inspección ya guardada. Queda registrado quién, cuándo, por qué y qué cambió. */
+export async function editarInspeccion(
+  inspeccionId: string,
+  cambios: CambiosInspeccion,
+  motivo: string
+): Promise<{ success: boolean; error?: string; actualizaEquipo?: boolean }> {
+  if (!isSupabaseConfigured()) {
+    return { success: false, error: 'La edición requiere conexión con la base de datos.' };
+  }
+  try {
+    const supabase = createClient();
+    const { data, error } = await (supabase as any).rpc('editar_inspeccion_supervisor', {
+      p_inspeccion_id: inspeccionId,
+      p_cambios: cambios,
+      p_motivo: motivo,
+    });
+    if (error) {
+      // Los errores de la función vienen como "CODIGO: mensaje"
+      const msg = String(error.message || '').replace(/^[A-Z_]+:\s*/, '');
+      return { success: false, error: msg || 'No se pudo guardar la edición' };
+    }
+    return { success: true, actualizaEquipo: Boolean(data?.actualiza_equipo) };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error de conexión al guardar la edición' };
+  }
 }
 
 /**

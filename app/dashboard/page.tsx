@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { OperadoresAdminPanel } from '../../components/OperadoresAdminPanel';
 import { HistorialEquipoModal } from '../../components/HistorialEquipoModal';
+import { InspeccionDetalleModal } from '../../components/InspeccionDetalleModal';
 import {
   fetchEquipos,
   fetchInspecciones,
+  fetchNombresPerfiles,
   fetchFallas,
   updateFallaEstado,
   archivarFalla,
@@ -87,6 +89,8 @@ export default function SupervisorDashboardPage() {
   const [editEquipo, setEditEquipo] = useState<Equipo | null>(null);
   const [deleteConfirmEquipo, setDeleteConfirmEquipo] = useState<Equipo | null>(null);
   const [historialEquipo, setHistorialEquipo] = useState<Equipo | null>(null);
+  const [inspeccionAbierta, setInspeccionAbierta] = useState<Inspeccion | null>(null);
+  const [nombresPerfiles, setNombresPerfiles] = useState<Record<string, { nombre: string; legajo: string | null }>>({});
   const [printQrEquipo, setPrintQrEquipo] = useState<Equipo | null>(null);
   const [serviceModalEquipo, setServiceModalEquipo] = useState<Equipo | null>(null);
   const [serviceIntervaloInput, setServiceIntervaloInput] = useState<string>('250');
@@ -110,11 +114,13 @@ export default function SupervisorDashboardPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [eqs, insps, fls] = await Promise.all([
+      const [eqs, insps, fls, nombres] = await Promise.all([
         fetchEquipos(true), // Cargar activos y dados de baja para supervisores
         fetchInspecciones(),
         fetchFallas(true), // Cargar activas y archivadas para supervisores
+        fetchNombresPerfiles().catch(() => ({})),
       ]);
+      setNombresPerfiles(nombres);
 
       setEquipos(eqs);
       setInspecciones(insps);
@@ -1169,7 +1175,18 @@ export default function SupervisorDashboardPage() {
               const eq = equipos.find((e) => e.id === insp.equipo_id);
               return (
                 <ScrollReveal key={insp.id} delay={idx * 40} distance={12}>
-                  <div className="bg-[#111724] border border-slate-800/90 hover:border-slate-700/80 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md transition">
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setInspeccionAbierta(insp)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setInspeccionAbierta(insp);
+                      }
+                    }}
+                    title="Ver y editar la inspección"
+                    className="bg-[#111724] border border-slate-800/90 hover:border-amber-500/50 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md transition cursor-pointer">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-[#0B0F17] border border-slate-700/80 flex items-center justify-center text-amber-400 font-mono font-black">
                         {eq?.interno || '—'}
@@ -1180,7 +1197,7 @@ export default function SupervisorDashboardPage() {
                         </div>
                         <div className="text-xs font-mono text-slate-400 flex items-center gap-2 mt-0.5">
                           <User size={12} className="text-slate-500" />
-                          <span>Operador: {insp.operador_id.slice(0, 8)}</span>
+                          <span>Operador: {nombresPerfiles[insp.operador_id]?.nombre ?? insp.operador_id.slice(0, 8)}</span>
                           <span className="text-slate-600">•</span>
                           <Gauge size={12} className="text-slate-500" />
                           <span className="font-tabular text-slate-200">{insp.horometro} hs</span>
@@ -1192,6 +1209,14 @@ export default function SupervisorDashboardPage() {
                       <span className="text-xs font-mono text-slate-400">
                         {formatDate(insp.finalizado_en || insp.iniciado_en)}
                       </span>
+                      {insp.editada_en && (
+                        <span
+                          className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border bg-amber-950 text-amber-300 border-amber-500/50"
+                          title={`Editada el ${formatDate(insp.editada_en)}`}
+                        >
+                          Editada
+                        </span>
+                      )}
                       {insp.estado_resultante && (
                         <StatusBadge estado={insp.estado_resultante} size="sm" />
                       )}
@@ -1206,6 +1231,18 @@ export default function SupervisorDashboardPage() {
 
       {/* TAB 4: OPERADORES, PIN Y TARJETAS QR */}
       {activeTab === 'operadores' && <OperadoresAdminPanel />}
+
+      {/* MODAL: DETALLE, EDICIÓN Y REEDICIONES DE UNA INSPECCIÓN */}
+      {inspeccionAbierta && (
+        <InspeccionDetalleModal
+          inspeccion={inspeccionAbierta}
+          equipo={equipos.find((e) => e.id === inspeccionAbierta.equipo_id)}
+          onClose={() => setInspeccionAbierta(null)}
+          onSaved={() => {
+            loadData();
+          }}
+        />
+      )}
 
       {/* MODAL: HISTORIAL DE CAMBIOS DEL EQUIPO */}
       {historialEquipo && (

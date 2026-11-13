@@ -61,7 +61,7 @@ import {
 } from '../app/api/supervisor/operadores/route.ts';
 import { isAllowedOrigin } from '../lib/server/http.ts';
 import { persistentRateLimit } from '../lib/server/rateLimitStore.ts';
-import { formatearValorAuditoria } from '../lib/utils/auditoria.ts';
+import { formatearValorAuditoria, formatearValorCambioInspeccion } from '../lib/utils/auditoria.ts';
 import { validarPin, validarLegajo } from '../lib/utils/pin.ts';
 import crypto from 'crypto';
 
@@ -532,6 +532,12 @@ assert(formatearValorAuditoria('marca', null) === '—', '[AUDITORÍA] Un valor 
 assert(formatearValorAuditoria('deleted_at', null) === 'Activo', '[AUDITORÍA] deleted_at vacío significa equipo activo', 'UNIT (PROD CODE)');
 assert(formatearValorAuditoria('deleted_at', '2026-11-16T12:00:00Z').startsWith('Baja el '), '[AUDITORÍA] deleted_at con fecha se muestra como baja', 'UNIT (PROD CODE)');
 assert(formatearValorAuditoria('horometro_actual', 1250.5) === '1250.5', '[AUDITORÍA] Los números se muestran tal cual', 'UNIT (PROD CODE)');
+
+assert(formatearValorCambioInspeccion('valor_bool', true) === 'OK', '[REEDICIÓN] valor_bool true se muestra como OK', 'UNIT (PROD CODE)');
+assert(formatearValorCambioInspeccion('valor_bool', false) === 'No OK', '[REEDICIÓN] valor_bool false se muestra como No OK', 'UNIT (PROD CODE)');
+assert(formatearValorCambioInspeccion('estado_resultante', 'observado') === 'Observado', '[REEDICIÓN] el estado se traduce a texto', 'UNIT (PROD CODE)');
+assert(formatearValorCambioInspeccion('falla_gravedad', 'media') === 'Media', '[REEDICIÓN] la gravedad se capitaliza', 'UNIT (PROD CODE)');
+assert(formatearValorCambioInspeccion('valor_texto', null) === '—', '[REEDICIÓN] un valor vacío se muestra como guion', 'UNIT (PROD CODE)');
 
 // REGRESIÓN 12: Con acceso directo, probar muchos legajos inexistentes desde una IP se frena (anti enumeración)
 let bloqueadoSinFallos = false;
