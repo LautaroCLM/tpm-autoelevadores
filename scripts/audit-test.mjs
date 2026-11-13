@@ -61,6 +61,7 @@ import {
 } from '../app/api/supervisor/operadores/route.ts';
 import { isAllowedOrigin } from '../lib/server/http.ts';
 import { persistentRateLimit } from '../lib/server/rateLimitStore.ts';
+import { formatearValorAuditoria } from '../lib/utils/auditoria.ts';
 import { validarPin, validarLegajo } from '../lib/utils/pin.ts';
 import crypto from 'crypto';
 
@@ -524,6 +525,13 @@ assert(
   '[REGRESIÓN 11.C] Consultar el estado no consume cupo (no hay bloqueo por solo mirar)',
   'SECURITY (RATE LIMITING)'
 );
+
+// REGRESIÓN 13: Formato legible del historial de cambios de equipos
+assert(formatearValorAuditoria('estado', 'fuera_de_servicio') === 'Fuera de servicio', '[AUDITORÍA] Traduce el estado a texto legible', 'UNIT (PROD CODE)');
+assert(formatearValorAuditoria('marca', null) === '—', '[AUDITORÍA] Un valor vacío se muestra como guion', 'UNIT (PROD CODE)');
+assert(formatearValorAuditoria('deleted_at', null) === 'Activo', '[AUDITORÍA] deleted_at vacío significa equipo activo', 'UNIT (PROD CODE)');
+assert(formatearValorAuditoria('deleted_at', '2026-11-16T12:00:00Z').startsWith('Baja el '), '[AUDITORÍA] deleted_at con fecha se muestra como baja', 'UNIT (PROD CODE)');
+assert(formatearValorAuditoria('horometro_actual', 1250.5) === '1250.5', '[AUDITORÍA] Los números se muestran tal cual', 'UNIT (PROD CODE)');
 
 // REGRESIÓN 12: Pedidos sin credencial NO bloquean el legajo (solo cuentan los fallos de credencial)
 let bloqueadoSinFallos = false;
