@@ -297,8 +297,8 @@ const reqLegajoOnly = new Request('http://localhost', {
 const resLegajoOnly = await quickLoginPost(reqLegajoOnly);
 const dataLegajoOnly = await resLegajoOnly.json();
 assert(
-  resLegajoOnly.status === 401 && dataLegajoOnly.error?.includes('Credencial requerida'),
-  '[REGRESIÓN 1] Legajo por sí solo es rechazado con HTTP 401 (identificador público)',
+  resLegajoOnly.status === 401 && !dataLegajoOnly.session,
+  '[REGRESIÓN 1] Acceso directo: un legajo inexistente es rechazado con HTTP 401 y sin sesión',
   'SECURITY (PROD ENDPOINT)'
 );
 
@@ -533,7 +533,7 @@ assert(formatearValorAuditoria('deleted_at', null) === 'Activo', '[AUDITORÍA] d
 assert(formatearValorAuditoria('deleted_at', '2026-11-16T12:00:00Z').startsWith('Baja el '), '[AUDITORÍA] deleted_at con fecha se muestra como baja', 'UNIT (PROD CODE)');
 assert(formatearValorAuditoria('horometro_actual', 1250.5) === '1250.5', '[AUDITORÍA] Los números se muestran tal cual', 'UNIT (PROD CODE)');
 
-// REGRESIÓN 12: Pedidos sin credencial NO bloquean el legajo (solo cuentan los fallos de credencial)
+// REGRESIÓN 12: Con acceso directo, probar muchos legajos inexistentes desde una IP se frena (anti enumeración)
 let bloqueadoSinFallos = false;
 for (let i = 0; i < 8; i++) {
   const r = await quickLoginPost(
@@ -546,8 +546,8 @@ for (let i = 0; i < 8; i++) {
   if (r.status === 429) bloqueadoSinFallos = true;
 }
 assert(
-  bloqueadoSinFallos === false,
-  '[REGRESIÓN 12] 8 pedidos sin credencial sobre un legajo no lo bloquean (nadie puede bloquear a un operario enviando pedidos)',
+  bloqueadoSinFallos === true,
+  '[REGRESIÓN 12] 8 intentos sobre un legajo inexistente terminan bloqueados (frena la enumeración de legajos)',
   'SECURITY (RATE LIMITING)'
 );
 

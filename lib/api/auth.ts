@@ -214,14 +214,8 @@ export async function signInOperatorWithQR(qrString: string): Promise<{
     return await loginOperadorViaServidor({ legajo, token }, 'Credencial QR no válida o revocada');
   }
 
-  // Si es el formato estándar de credencial física de planta sin token (ej: "TPM:OP:4029" o legajo directo),
-  // el legajo es un identificador público. No se permite acceso anónimo automático sin validar identidad.
-  return {
-    success: false,
-    requiresPin: true,
-    legajo,
-    error: 'Credencial identificatoria detectada. Por favor ingrese su PIN o clave personal para autorizar la sesión.',
-  };
+  // Credencial sin token (ej: "TPM:OP:4029"): acceso directo por legajo
+  return await loginOperadorViaServidor({ legajo }, 'Operador no encontrado');
 }
 
 /**
@@ -243,15 +237,11 @@ export async function quickSignInOperator(
     return { success: false, error: 'Operador sin legajo asignado' };
   }
 
+  // Sin PIN: acceso directo por legajo (el servidor aplica límites por IP y legajo)
   if (!pinOrToken) {
-    return {
-      success: false,
-      requiresPin: true,
-      error: 'Se requiere ingresar el PIN de seguridad del operador para acceder.',
-    };
+    return await loginOperadorViaServidor({ legajo }, 'No se pudo iniciar la sesión');
   }
 
-  // El PIN se valida en el servidor, que aplica limitación de intentos por IP y por legajo.
   return await loginOperadorViaServidor(
     { legajo, pin: pinOrToken.trim() },
     'PIN o credencial de operador incorrecta'

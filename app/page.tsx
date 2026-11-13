@@ -61,13 +61,6 @@ export default function HomePage() {
   const [signingInId, setSigningInId] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Modal de PIN de operador (para accesos táctiles o credenciales sin token)
-  const [pinModalOpen, setPinModalOpen] = useState(false);
-  const [pinTargetOp, setPinTargetOp] = useState<Perfil | null>(null);
-  const [enteredPin, setEnteredPin] = useState('');
-  const [submittingPin, setSubmittingPin] = useState(false);
-  const [pinError, setPinError] = useState<string | null>(null);
-
   const loadData = async () => {
     setLoading(true);
     try {
@@ -130,7 +123,8 @@ export default function HomePage() {
     toast.info('Sesión cerrada correctamente');
   };
 
-  const handleQuickSelectOperator = (op: Perfil) => {
+  // Acceso directo: un toque sobre el nombre inicia la sesión, sin PIN ni contraseña
+  const handleQuickSelectOperator = async (op: Perfil) => {
     if (signingInId) return;
 
     if (perfil?.legajo && perfil.legajo === op.legajo) {
@@ -138,24 +132,10 @@ export default function HomePage() {
       return;
     }
 
-    setPinTargetOp(op);
-    setEnteredPin('');
-    setPinError(null);
-    setPinModalOpen(true);
-  };
-
-  const handlePinSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!pinTargetOp || !enteredPin.trim()) return;
-
-    setSubmittingPin(true);
-    setPinError(null);
+    setSigningInId(op.id);
     try {
-      const res = await quickSignInOperator(pinTargetOp, enteredPin.trim());
+      const res = await quickSignInOperator(op);
       if (res.success && res.perfil) {
-        setPinModalOpen(false);
-        setPinTargetOp(null);
-        setEnteredPin('');
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('tpm_auth_changed'));
         }
@@ -168,12 +148,12 @@ export default function HomePage() {
           }
         }, 150);
       } else {
-        setPinError(res.error || 'PIN de operador incorrecto');
+        toast.error(res.error || 'No se pudo iniciar la sesión');
       }
     } catch (err: any) {
-      setPinError(err?.message || 'Error de conexión');
+      toast.error(err?.message || 'Error de conexión');
     } finally {
-      setSubmittingPin(false);
+      setSigningInId(null);
     }
   };
 
@@ -204,19 +184,6 @@ export default function HomePage() {
               fleetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
           }, 150);
-        } else if (res.requiresPin && res.legajo) {
-          // La credencial es válida pero no tiene token secreto embebido: solicitar PIN
-          const matchingOp = operadores.find((o) => o.legajo === res.legajo) || {
-            id: '',
-            legajo: res.legajo,
-            nombre: `Operador #${res.legajo}`,
-            rol: 'operador',
-            created_at: new Date().toISOString(),
-          };
-          setPinTargetOp(matchingOp);
-          setEnteredPin('');
-          setPinError(null);
-          setPinModalOpen(true);
         } else {
           toast.error(res.error || 'Credencial de operador no válida');
         }
@@ -429,7 +396,7 @@ export default function HomePage() {
                 Identificación de Operador Requerida
               </p>
               <p className="text-[11px] sm:text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
-                Escaneá tu credencial QR de operador o ingresá con tu legajo y clave para habilitar tu turno de trabajo.
+                Escaneá tu credencial QR de operador o ingresá con tu legajo para habilitar tu turno de trabajo.
               </p>
               <div className="flex items-center justify-center gap-2 pt-1 flex-wrap">
                 <button
@@ -650,95 +617,6 @@ export default function HomePage() {
         />
       )}
 
-      {/* Modal de PIN de Operador (Prevención de Suplantación) */}
-      {pinModalOpen && pinTargetOp && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#111724] border border-slate-850 rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-amber-400">
-                <Lock size={18} />
-                <h3 className="text-sm font-bold text-white">Validar Identidad de Operador</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setPinModalOpen(false);
-                  setPinTargetOp(null);
-                }}
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center justify-center font-black text-sm shrink-0">
-                {pinTargetOp.nombre.slice(0, 2).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white truncate">{pinTargetOp.nombre}</p>
-                <p className="text-[11px] font-mono text-slate-400">
-                  Legajo #{pinTargetOp.legajo || 'S/N'}
-                </p>
-              </div>
-            </div>
-
-            <form onSubmit={handlePinSubmit} className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  PIN o Clave Personal de Acceso
-                </label>
-                <input
-                  type="password"
-                  autoFocus
-                  required
-                  value={enteredPin}
-                  onChange={(e) => setEnteredPin(e.target.value)}
-                  placeholder="Ingrese su PIN asignado"
-                  className="w-full px-3.5 py-2.5 bg-slate-900 border border-slate-700 rounded-xl text-white text-sm focus:outline-hidden focus:border-amber-400 font-mono tracking-widest text-center"
-                />
-              </div>
-
-              {pinError && (
-                <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-500/40 text-rose-300 text-xs">
-                  {pinError}
-                </div>
-              )}
-
-              <div className="flex items-center gap-2 pt-1">
-                <button
-                  type="button"
-                  disabled={submittingPin}
-                  onClick={() => {
-                    setPinModalOpen(false);
-                    setPinTargetOp(null);
-                  }}
-                  className="flex-1 py-2 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={submittingPin || !enteredPin.trim()}
-                  className="flex-1 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center justify-center gap-1.5 disabled:opacity-50"
-                >
-                  {submittingPin ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" />
-                      <span>Validando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <UserCheck size={14} />
-                      <span>Confirmar Turno</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
