@@ -26,7 +26,7 @@ const EquipoQRModal = dynamic(
   () => import('../components/EquipoQRModal').then((mod) => mod.EquipoQRModal),
   { ssr: false }
 );
-import { extractEquipoCode } from '../lib/utils/auth-helpers';
+import { extractEquipoCode, sanitizeRedirectUrl } from '../lib/utils/auth-helpers';
 import { formatQrCodigoDisplay } from '../lib/utils';
 import {
   QrCode,
@@ -60,6 +60,18 @@ export default function HomePage() {
   const [selectedQrEquipo, setSelectedQrEquipo] = useState<Equipo | null>(null);
   const [signingInId, setSigningInId] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
+
+  // Destino al que volver tras identificarse (viene de escanear el QR de un autoelevador)
+  const [destino, setDestino] = useState<string | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = new URLSearchParams(window.location.search).get('redirect');
+    const limpio = sanitizeRedirectUrl(raw, '');
+    setDestino(limpio && limpio !== '/' ? limpio : null);
+  }, []);
+  useEffect(() => {
+    if (destino && perfil) router.replace(destino);
+  }, [destino, perfil, router]);
 
   const loadData = async () => {
     setLoading(true);
@@ -369,7 +381,9 @@ export default function HomePage() {
                 </h2>
               </div>
               <p className="text-xs text-slate-400">
-                Seleccioná tu usuario para iniciar sesión rápidamente en tu turno de trabajo:
+                {destino
+                  ? 'Elegí tu nombre y te llevamos directo al checklist del autoelevador que escaneaste:'
+                  : 'Seleccioná tu usuario para iniciar sesión rápidamente en tu turno de trabajo:'}
               </p>
             </div>
 
