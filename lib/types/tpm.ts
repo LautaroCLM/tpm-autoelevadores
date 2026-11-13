@@ -23,6 +23,28 @@ export type GravedadFalla = 'leve' | 'media' | 'critica';
 export type EstadoReparacion = 'pendiente' | 'en_revision' | 'reparando' | 'reparado' | 'cerrado';
 export type TipoDatoItem = 'booleano' | 'numero' | 'texto';
 
+/** Acción registrada en el historial de cambios de un autoelevador. */
+export type AccionAuditoriaEquipo =
+  | 'alta'
+  | 'edicion'
+  | 'baja'
+  | 'reactivacion'
+  | 'estado_inspeccion'
+  | 'sistema';
+
+/** Una entrada del historial de cambios de un autoelevador (tabla equipos_auditoria). */
+export interface EquipoAuditoria {
+  id: string;
+  equipo_id: string;
+  interno: string | null;
+  accion: AccionAuditoriaEquipo;
+  usuario_id: string | null;
+  usuario_nombre: string | null;
+  /** Por campo modificado: valor anterior y nuevo. */
+  cambios: Record<string, { antes: unknown; despues: unknown }>;
+  creado_en: string;
+}
+
 export interface ChecklistItemResponse {
   item_id: string;
   valor_bool: boolean | null;

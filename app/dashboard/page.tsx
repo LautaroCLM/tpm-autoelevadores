@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { OperadoresAdminPanel } from '../../components/OperadoresAdminPanel';
+import { HistorialEquipoModal } from '../../components/HistorialEquipoModal';
 import {
   fetchEquipos,
   fetchInspecciones,
@@ -54,6 +55,7 @@ import {
   Trash2,
   Archive,
   ArchiveRestore,
+  History,
   QrCode,
   Printer,
   ShieldCheck,
@@ -84,6 +86,7 @@ export default function SupervisorDashboardPage() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editEquipo, setEditEquipo] = useState<Equipo | null>(null);
   const [deleteConfirmEquipo, setDeleteConfirmEquipo] = useState<Equipo | null>(null);
+  const [historialEquipo, setHistorialEquipo] = useState<Equipo | null>(null);
   const [printQrEquipo, setPrintQrEquipo] = useState<Equipo | null>(null);
   const [serviceModalEquipo, setServiceModalEquipo] = useState<Equipo | null>(null);
   const [serviceIntervaloInput, setServiceIntervaloInput] = useState<string>('250');
@@ -894,6 +897,16 @@ export default function SupervisorDashboardPage() {
                             <span>Placa QR</span>
                           </button>
 
+                          <button
+                            type="button"
+                            onClick={() => setHistorialEquipo(eq)}
+                            className="btn-tactile px-2.5 py-1.5 bg-[#0B0F17] hover:bg-slate-800 text-slate-300 font-mono font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-slate-700/80 cursor-pointer"
+                            title="Ver quién modificó este equipo y cuándo"
+                          >
+                            <History size={13} className="text-amber-400 shrink-0" />
+                            <span>Historial</span>
+                          </button>
+
                           {!eq.deleted_at && (
                             <button
                               type="button"
@@ -1193,6 +1206,11 @@ export default function SupervisorDashboardPage() {
 
       {/* TAB 4: OPERADORES, PIN Y TARJETAS QR */}
       {activeTab === 'operadores' && <OperadoresAdminPanel />}
+
+      {/* MODAL: HISTORIAL DE CAMBIOS DEL EQUIPO */}
+      {historialEquipo && (
+        <HistorialEquipoModal equipo={historialEquipo} onClose={() => setHistorialEquipo(null)} />
+      )}
 
       {/* MODAL 1: REGISTRAR NUEVO EQUIPO */}
       {createModalOpen && (

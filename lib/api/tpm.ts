@@ -7,6 +7,7 @@ import {
   Falla,
   InspeccionPayload,
   InspeccionConDetalle,
+  EquipoAuditoria,
 } from '../types/tpm';
 import {
   getMockEquipos,
@@ -876,6 +877,28 @@ export async function reactivarEquipo(id: string): Promise<{ success: boolean; e
   }
 
   return { success: true };
+}
+
+/**
+ * Historial de cambios de un autoelevador (más recientes primero).
+ * Solo supervisión y mantenimiento pueden leerlo (RLS); para otros roles devuelve [].
+ */
+export async function fetchHistorialEquipo(equipoId: string, limite = 100): Promise<EquipoAuditoria[]> {
+  if (!equipoId || !isSupabaseConfigured()) return [];
+
+  const supabase = createClient();
+  const { data, error } = await (supabase.from('equipos_auditoria') as any)
+    .select('id, equipo_id, interno, accion, usuario_id, usuario_nombre, cambios, creado_en')
+    .eq('equipo_id', equipoId)
+    .order('creado_en', { ascending: false })
+    .limit(limite);
+
+  if (error) {
+    console.error('Error consultando historial del equipo:', error);
+    throw new Error(`Error al consultar el historial del equipo: ${error.message}`);
+  }
+
+  return (data || []) as EquipoAuditoria[];
 }
 
 /**
